@@ -2,213 +2,300 @@ name: Build LiteRT Libraries
 
 on:
   push:
-    branches: [ main ] # 在主分支推送时触发
+    branches: [ main ]
   pull_request:
-    branches: [ main ] # 在向主分支发起 PR 时触发
-  workflow_dispatch:   # 允许手动触发
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
     name: Build LiteRT for ${{ matrix.target_name }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false # 即使一个构建失败，其他构建也会继续
+      fail-fast: false
       matrix:
         include:
           # --- Linux ---
           - os: ubuntu-latest
             target_name: Linux-x64
-            bazel_version: 6.4.0 # 或 LiteRT 兼容的最新 Bazel 版本
-            bazel_config: "--config=linux_x86_64 -c opt" # 优化编译
+            bazel_config: "--config=linux_x86_64 -c opt"
             artifact_suffix: linux-x64
             setup_script: |
-              sudo apt-get update && sudo apt-get install -y build-essential python3-dev curl zip
+              set -ex # Exit on error, print commands
+              sudo apt-get update && sudo apt-get install -y build-essential python3-dev python3-pip curl zip git
+              # LiteRT/TFLite often needs specific numpy version
+              pip3 install numpy==1.23.5 wheel # Adjust numpy version if needed based on LiteRT setup logs
 
           # --- macOS ---
-          - os: macos-latest # 通常包含 Xcode
-            target_name: macOS-Universal # x86_64 + arm64
-            bazel_version: 6.4.0
-            # 使用 --macos_cpus 构建 Universal Binary
+          - os: macos-latest
+            target_name: macOS-Universal
+            # Note: Universal build might take longer and require more disk space
             bazel_config: "--macos_cpus=x86_64,arm64 --config=macos -c opt"
             artifact_suffix: macos-universal
-            setup_script: "" # macOS runner 通常包含必要工具
+            setup_script: |
+              set -ex
+              # Ensure Python and pip are available for configuration
+              brew install python || true # Install if not present, ignore if already installed
+              pip3 install numpy==1.23.5 wheel # Adjust numpy version if needed
 
           # --- Windows ---
-          - os: windows-latest # 通常包含 Visual Studio Build Tools
+          - os: windows-latest
             target_name: Windows-x64
-            bazel_version: 6.4.0
             bazel_config: "--config=windows_x86_64 -c opt"
             artifact_suffix: windows-x64
-            setup_script: "" # Windows runner 通常包含必要工具, Bazel 会尝试寻找 MSVC
+            # Bazel on Windows needs bash for some operations
+            shell: bash
+            setup_script: |
+              set -ex
+              # Ensure Python and pip are available
+              # GitHub Windows runners usually have Python, ensure pip and numpy
+              python -m pip install --upgrade pip
+              pip install numpy==1.23.5 wheel # Adjust numpy version if needed
 
-          # --- Android --- (使用 Linux runner 进行交叉编译)
+          # --- Android --- (Using Linux runner)
           - os: ubuntu-latest
             target_name: Android-arm64-v8a
-            bazel_version: 6.4.0
             bazel_config: "--config=android_arm64 -c opt"
             artifact_suffix: android-arm64-v8a
+            # Group common Android setup into one script
             setup_script: |
-              sudo apt-get update && sudo apt-get install -y openjdk-11-jdk python3-dev curl zip
-              # 安装 Android SDK 和 NDK (示例, 可能需要调整版本)
-              export ANDROID_HOME=$HOME/android-sdk
-              export ANDROID_NDK_HOME=$ANDROID_HOME/ndk-bundle # 或指定 NDK 版本路径
-              mkdir -p $ANDROID_HOME
-              # 下载并解压 Android 命令行工具
+              set -ex # Exit on error, print commands
+              sudo apt-get update && sudo apt-get install -y openjdk-11-jdk python3-dev python3-pip curl zip git wget unzip
+              pip3 install numpy==1.23.5 wheel # Adjust numpy version if needed
+
+              # Install Android SDK Command-line Tools
+              export ANDROID_SDK_ROOT=$HOME/android-sdk
+              mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
+              # Use a slightly older known good version or stick to latest and hope
+              # wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
               wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O cmdline-tools.zip
-              unzip cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
-              mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-              # 设置 PATH
-              export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
-              # 接受许可证并安装 NDK 和 Platform Tools
-              yes | sdkmanager --licenses > /dev/null
-              sdkmanager "platform-tools" "ndk;25.2.9519653" # 使用特定 NDK 版本
-              export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653 # 更新 NDK 路径
-              # 验证 NDK 路径 (可选)
-              ls $ANDROID_NDK_HOME
+              unzip -q cmdline-tools.zip -d $ANDROID_SDK_ROOT/cmdline-tools
+              # The zip now often extracts into cmdline-tools/cmdline-tools directly
+              # Adjust based on actual extracted structure
+              mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest || true # Handle case where it's already named latest
+              rm cmdline-tools.zip
+
+              # Add to PATH
+              export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools
+
+              # Update sdkmanager itself first!
+              echo "Updating sdkmanager..."
+              sdkmanager --update || echo "sdkmanager update failed, proceeding anyway..." # Try updating, but don't fail job if update fails
+
+              # Accept licenses non-interactively BEFORE trying to install packages
+              echo "Accepting licenses..."
+              yes | sdkmanager --licenses || echo "Failed to accept licenses automatically. Check for prompts or XML errors."
+
+              # Install NDK and Platform Tools (Specify a known good NDK version if possible)
+              NDK_VERSION="25.2.9519653" # Or check LiteRT docs for recommended version
+              echo "Installing NDK ${NDK_VERSION} and platform-tools..."
+              sdkmanager "platform-tools" "ndk;${NDK_VERSION}"
+
+              # Set environment variables for Bazel
+              export ANDROID_HOME=$ANDROID_SDK_ROOT # Some tools use ANDROID_HOME
+              export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION
+
+              # Verify NDK installation
+              if [ ! -d "$ANDROID_NDK_HOME" ]; then
+                echo "Error: Android NDK not found at $ANDROID_NDK_HOME after installation attempt."
+                ls -l $ANDROID_SDK_ROOT/ndk/ # List contents for debugging
+                exit 1
+              fi
               echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
               echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+              echo "NDK Path: $ANDROID_NDK_HOME"
+              ls -l $ANDROID_NDK_HOME # Confirm NDK contents
 
           - os: ubuntu-latest
             target_name: Android-armeabi-v7a
-            bazel_version: 6.4.0
             bazel_config: "--config=android_arm -c opt"
             artifact_suffix: android-armeabi-v7a
-            # setup_script 与 arm64-v8a 相同 (可以优化为共享步骤)
+            # Use the same setup script as arm64-v8a
             setup_script: |
-              sudo apt-get update && sudo apt-get install -y openjdk-11-jdk python3-dev curl zip
-              export ANDROID_HOME=$HOME/android-sdk
-              export ANDROID_NDK_HOME=$ANDROID_HOME/ndk-bundle
-              mkdir -p $ANDROID_HOME
+              set -ex
+              sudo apt-get update && sudo apt-get install -y openjdk-11-jdk python3-dev python3-pip curl zip git wget unzip
+              pip3 install numpy==1.23.5 wheel # Adjust numpy version if needed
+              export ANDROID_SDK_ROOT=$HOME/android-sdk
+              mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
               wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O cmdline-tools.zip
-              unzip cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
-              mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-              export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
-              yes | sdkmanager --licenses > /dev/null
-              sdkmanager "platform-tools" "ndk;25.2.9519653"
-              export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653
-              ls $ANDROID_NDK_HOME
+              unzip -q cmdline-tools.zip -d $ANDROID_SDK_ROOT/cmdline-tools
+              mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest || true
+              rm cmdline-tools.zip
+              export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools
+              echo "Updating sdkmanager..."
+              sdkmanager --update || echo "sdkmanager update failed, proceeding anyway..."
+              echo "Accepting licenses..."
+              yes | sdkmanager --licenses || echo "Failed to accept licenses automatically."
+              NDK_VERSION="25.2.9519653"
+              echo "Installing NDK ${NDK_VERSION} and platform-tools..."
+              sdkmanager "platform-tools" "ndk;${NDK_VERSION}"
+              export ANDROID_HOME=$ANDROID_SDK_ROOT
+              export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION
+              if [ ! -d "$ANDROID_NDK_HOME" ]; then
+                echo "Error: Android NDK not found at $ANDROID_NDK_HOME after installation attempt."
+                ls -l $ANDROID_SDK_ROOT/ndk/
+                exit 1
+              fi
               echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
               echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+              echo "NDK Path: $ANDROID_NDK_HOME"
+              ls -l $ANDROID_NDK_HOME
 
-          # --- iOS --- (使用 macOS runner 进行交叉编译)
+          # --- iOS --- (Using macOS runner) - Requires Xcode installed on runner
           - os: macos-latest
             target_name: iOS-arm64
-            bazel_version: 6.4.0
-            # 需要 Xcode 和 iOS SDK
             bazel_config: "--config=ios_arm64 -c opt"
             artifact_suffix: ios-arm64
-            setup_script: "" # macOS runner 通常包含 Xcode
+            setup_script: |
+              set -ex
+              brew install python || true
+              pip3 install numpy==1.23.5 wheel # Adjust numpy version if needed
 
-          - os: macos-latest
-            target_name: iOS-Simulator-arm64 # M1/M2 Mac 上的模拟器
-            bazel_version: 6.4.0
-            bazel_config: "--config=ios_sim_arm64 -c opt"
-            artifact_suffix: ios-simulator-arm64
-            setup_script: ""
-
-          - os: macos-latest
-            target_name: iOS-Simulator-x86_64 # Intel Mac 上的模拟器
-            bazel_version: 6.4.0
-            bazel_config: "--config=ios_x86_64 -c opt"
-            artifact_suffix: ios-simulator-x86_64
-            setup_script: ""
+          # Add other iOS targets (Simulator) if needed, using similar setup
+          # - os: macos-latest
+          #   target_name: iOS-Simulator-arm64
+          #   bazel_config: "--config=ios_sim_arm64 -c opt"
+          #   artifact_suffix: ios-simulator-arm64
+          #   setup_script: |
+          #     set -ex
+          #     brew install python || true
+          #     pip3 install numpy==1.23.5 wheel
 
     steps:
     - name: Checkout LiteRT source code
       uses: actions/checkout@v4
       with:
-        # 如果 LiteRT 使用了 Git LFS, 需要启用
-        # lfs: true
-        # 如果 LiteRT 依赖 Git Submodules, 需要递归检出
-        # submodules: 'recursive'
-        repository: google-ai-edge/LiteRT # 明确指定仓库
+        repository: google-ai-edge/LiteRT # Explicitly checkout LiteRT
+        # submodules: 'recursive' # Uncomment if LiteRT uses submodules
+        # lfs: true # Uncomment if LiteRT uses Git LFS
 
-    - name: Setup Platform Dependencies
-      if: matrix.setup_script != ''
-      shell: bash # 确保在 Linux/macOS 上使用 bash
+    - name: Setup Platform Dependencies and Environment
+      # Use bash for all setup scripts for consistency
+      shell: bash
       run: ${{ matrix.setup_script }}
 
-    # Windows 需要特殊处理路径和环境设置 (如果 Bazel 自动查找失败)
-    # - name: Setup MSVC environment (Windows only)
-    #   if: runner.os == 'Windows'
-    #   uses: ilammy/msvc-dev-cmd@v1
-
+    # Use Bazelisk to manage Bazel versions
     - name: Setup Bazelisk (Manages Bazel versions)
       uses: bazelbuild/setup-bazelisk@v3
-      # Bazelisk 会读取项目根目录的 .bazelversion 文件 (如果存在)
-      # 或者你可以强制指定版本如下:
+      # Bazelisk will automatically use .bazelversion if present in LiteRT repo root
+      # Otherwise, specify version explicitly if needed:
       # with:
-      #   bazel-version: ${{ matrix.bazel_version }}
+      #   bazel-version: '6.4.0' # Or specific version required by LiteRT
 
-    # 某些 Bazel 项目 (尤其是 TensorFlow 相关) 需要配置工作区
-    # LiteRT 可能继承了 TFLite 的这个需求, 检查是否有 configure.py 或类似脚本
-    # 如果需要, 在这里运行配置步骤, 并设置必要的环境变量 (如 PYTHON_BIN_PATH)
-    # - name: Configure Workspace (if necessary)
-    #   run: |
-    #     # export PYTHON_BIN_PATH=$(which python3) # 示例
-    #     # ./configure # 或者其他配置命令
+    - name: Show Bazel version
+      run: bazel --version
+
+    # IMPORTANT: Configure LiteRT Workspace (Likely needed for non-Android)
+    - name: Configure Workspace (Run LiteRT setup)
+      shell: bash
+      run: |
+        set -ex
+        # Check if a configure script exists. Common pattern for TF/TFLite based projects.
+        if [ -f ./configure.py ]; then
+          # Set environment variables needed by configure.py
+          # Ensure python3 is used, adjust path if needed
+          export PYTHON_BIN_PATH=$(which python3 || which python)
+          echo "Configuring workspace using PYTHON_BIN_PATH=${PYTHON_BIN_PATH}"
+          # Run configure.py non-interactively, accepting defaults
+          # You might need to adjust flags based on configure.py's options
+          python3 ./configure.py
+        elif [ -f ./configure ]; then
+           echo "Configuring workspace using ./configure"
+          ./configure # Adjust if it needs specific flags or env vars
+        else
+          echo "No ./configure.py or ./configure script found. Skipping configuration step."
+          # If builds fail later, configuration might be needed manually or via env vars.
+        fi
 
     - name: Build LiteRT C API Library
-      shell: bash # 在 Windows 上也使用 bash (Git Bash) 以统一命令
+      shell: bash
       run: |
+        set -ex
         echo "Building with Bazel config: ${{ matrix.bazel_config }}"
-        # Bazel 构建命令, 目标是 C API 库
-        # //tensorflow/lite/c:litert_c_api 是 LiteRT C API 的目标路径 (基于 TFLite 结构)
-        # --verbose_failures 提供更详细的错误输出
-        # --jobs=2 限制并发任务数，避免资源耗尽 (根据需要调整)
-        bazel build //tensorflow/lite/c:litert_c_api ${{ matrix.bazel_config }} --verbose_failures --jobs=2
+        # The target might be different, check LiteRT's BUILD files.
+        # Common alternatives: //tensorflow/lite/c:tensorflowlite_c (in TFLite)
+        # Verify the exact target name in google-ai-edge/LiteRT/tensorflow/lite/c/BUILD
+        LITERT_C_TARGET="//tensorflow/lite/c:litert_c_api"
+
+        echo "Attempting to build target: ${LITERT_C_TARGET}"
+        # Limit jobs to prevent runner resource exhaustion
+        # Add --verbose_failures for detailed errors on failure
+        bazel build ${LITERT_C_TARGET} ${{ matrix.bazel_config }} --verbose_failures --jobs=2
 
     - name: Prepare Artifacts
       shell: bash
       run: |
-        # 创建用于存放构建产物的目录结构
+        set -ex
         ARTIFACT_DIR="litert_build_${{ matrix.artifact_suffix }}"
         mkdir -p "${ARTIFACT_DIR}/lib"
-        mkdir -p "${ARTIFACT_DIR}/include/tensorflow/lite/c" # 创建 LiteRT 头文件所需路径
+        # Ensure include path matches the header locations relative to workspace root
+        INCLUDE_DEST="${ARTIFACT_DIR}/include/tensorflow/lite/c"
+        mkdir -p "${INCLUDE_DEST}"
 
-        # 查找构建生成的库文件 (通常在 bazel-bin 目录下)
-        # 注意: 文件名和扩展名可能因平台和构建类型(静态/动态)而异
-        # 这里假设是静态库 (.a / .lib)
-        LIB_PATH=$(bazel cquery //tensorflow/lite/c:litert_c_api ${{ matrix.bazel_config }} --output=files)
-        echo "Found library file: ${LIB_PATH}"
+        LITERT_C_TARGET="//tensorflow/lite/c:litert_c_api" # Use the same target as build step
 
-        # 检查 LIB_PATH 是否为空或者无效
-        if [ -z "$LIB_PATH" ] || [ ! -f "$LIB_PATH" ]; then
-          echo "Error: Could not find built library file for target //tensorflow/lite/c:litert_c_api"
-          # 尝试查找 bazel-bin 目录下的文件作为备选方案
-          echo "Searching in bazel-bin..."
-          find bazel-bin/ -name "liblitert_c_api.*" # 打印找到的文件
-          # 如果需要更健壮的查找，可能需要调整 find 命令
-          LIB_PATH=$(find bazel-bin/ -path '*/tensorflow/lite/c/*liblitert_c_api.*' -print -quit)
+        # Use bazel cquery to find the output file path reliably
+        # Note: output=files might list multiple files (e.g., .a, .so). Filter for the library.
+        # Adjust the grep pattern based on expected file extension (.a, .lib, .so, .dylib)
+        LIB_PATH_QUERY=$(bazel cquery ${LITERT_C_TARGET} ${{ matrix.bazel_config }} --output=files 2>/dev/null | grep -E '\.(a|lib)$' | head -n 1) || true # Static lib focus
+
+        if [ -z "$LIB_PATH_QUERY" ] || [ ! -f "$LIB_PATH_QUERY" ]; then
+          echo "Warning: bazel cquery did not find the static library (.a/.lib) directly for ${LITERT_C_TARGET}. Searching bazel-bin..."
+          # Fallback: Search common library names within bazel-bin
+          # Adjust find pattern if library name is different
+          SEARCH_PATTERN_A="*liblitert_c_api.a"
+          SEARCH_PATTERN_LIB="*litert_c_api.lib"
+          LIB_PATH=$(find bazel-bin/ -path '*/tensorflow/lite/c/*' -name "${SEARCH_PATTERN_A}" -o -name "${SEARCH_PATTERN_LIB}" -print -quit)
+
           if [ -z "$LIB_PATH" ] || [ ! -f "$LIB_PATH" ]; then
-             echo "Error: Still could not find library file in bazel-bin."
-             exit 1
+            echo "Error: Could not find the built library file in bazel-bin."
+            echo "Listing potential library files in bazel-bin:"
+            find bazel-bin/ -name "*.a" -o -name "*.lib" -o -name "*.so" -o -name "*.dylib" -o -name "*.dll"
+            exit 1
           fi
-          echo "Using found library: ${LIB_PATH}"
-        fi
-
-        # 复制库文件
-        cp "${LIB_PATH}" "${ARTIFACT_DIR}/lib/"
-
-        # 复制头文件 (从源代码树复制)
-        # 需要根据 LiteRT 的实际头文件位置调整
-        cp tensorflow/lite/c/*.h "${ARTIFACT_DIR}/include/tensorflow/lite/c/"
-
-        # （可选）复制其他必要的头文件，例如 TFLite Common 头文件
-        # cp tensorflow/lite/common/*.h "${ARTIFACT_DIR}/include/tensorflow/lite/common/" # 示例
-
-        # 打包成压缩文件
-        if [ "$RUNNER_OS" == "Windows" ]; then
-          7z a "${ARTIFACT_DIR}.zip" "${ARTIFACT_DIR}/"
+          echo "Found library via find: ${LIB_PATH}"
         else
-          tar -czvf "${ARTIFACT_DIR}.tar.gz" "${ARTIFACT_DIR}/"
+           LIB_PATH="$LIB_PATH_QUERY"
+           echo "Found library via cquery: ${LIB_PATH}"
         fi
-        echo "ARCHIVE_NAME=${ARTIFACT_DIR}" >> $GITHUB_ENV # 供下一步使用
+
+        # Copy the found library file
+        cp -v "${LIB_PATH}" "${ARTIFACT_DIR}/lib/"
+
+        # Copy public header files - **VERIFY THESE PATHS** in the LiteRT source tree
+        echo "Copying header files..."
+        HEADER_SRC_DIR="tensorflow/lite/c" # Source directory relative to repo root
+        if [ -d "${HEADER_SRC_DIR}" ]; then
+          cp -v "${HEADER_SRC_DIR}"/*.h "${INCLUDE_DEST}/"
+        else
+           echo "Warning: Header source directory ${HEADER_SRC_DIR} not found."
+        fi
+        # Potentially copy common headers if needed by litert_c_api.h
+        # COMMON_HEADER_SRC="tensorflow/lite/common"
+        # COMMON_HEADER_DEST="${ARTIFACT_DIR}/include/tensorflow/lite/common"
+        # if [ -d "${COMMON_HEADER_SRC}" ]; then
+        #   mkdir -p "${COMMON_HEADER_DEST}"
+        #   cp -v "${COMMON_HEADER_SRC}"/*.h "${COMMON_HEADER_DEST}/"
+        # fi
+
+        # Package the artifact
+        ARCHIVE_NAME="${ARTIFACT_DIR}"
+        echo "Creating archive: ${ARCHIVE_NAME}"
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          7z a "${ARCHIVE_NAME}.zip" "${ARTIFACT_DIR}/"
+          echo "ARCHIVE_FILE=${ARCHIVE_NAME}.zip" >> $GITHUB_ENV
+        else
+          tar -czvf "${ARCHIVE_NAME}.tar.gz" "${ARTIFACT_DIR}/"
+          echo "ARCHIVE_FILE=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
+        fi
+        echo "Artifact DIR: ${ARTIFACT_DIR}"
+        ls -R "${ARTIFACT_DIR}" # List contents of the artifact dir for verification
+
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: litert-libs-${{ matrix.artifact_suffix }}
-        path: | # 上传压缩包
-          ${{ env.ARCHIVE_NAME }}.* # 使用通配符匹配 .zip 或 .tar.gz
-        retention-days: 7 # 设置产物保留时间
+        # Use the exact archive file name determined in the previous step
+        path: ${{ env.ARCHIVE_FILE }}
+        retention-days: 7
