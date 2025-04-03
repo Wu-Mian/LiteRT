@@ -1,0 +1,292 @@
+# .github/workflows/build-litert.yml
+#
+# 使用 CMake 构建 LiteRT 跨平台库的 GitHub Actions 工作流
+#
+name: Build LiteRT Libraries (构建 LiteRT 库)
+
+# 控制工作流的触发时机
+on:
+  # 在向 main 分支推送时触发
+  push:
+    branches: [ "main" ]
+  # 在向 main 分支发起 Pull Request 时触发
+  pull_request:
+    branches: [ "main" ]
+  # 允许在 Actions 选项卡手动触发此工作流
+  workflow_dispatch:
+
+jobs:
+  # 构建 Linux (x86_64) 平台的任务
+  build-linux:
+    name: 构建 Linux (x64)
+    runs-on: ubuntu-latest # 使用最新的 Ubuntu runner
+    steps:
+      # 步骤 1: 检出仓库代码
+      - name: Checkout repository (检出仓库)
+        uses: actions/checkout@v4
+        # 如果 LiteRT 是你仓库中的子模块，请取消下面这行的注释:
+        # with:
+        #   submodules: 'recursive'
+
+      # 步骤 2: 安装构建依赖 (CMake, C++ 编译器)
+      - name: Install dependencies (安装依赖)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential
+
+      # 步骤 3: 使用 CMake 配置 LiteRT 构建
+      #   -S . : 指定源代码目录 (当前目录)
+      #   -B build : 指定构建目录
+      #   -DCMAKE_INSTALL_PREFIX=install : 设置头文件和库的安装路径
+      #   -DCMAKE_BUILD_TYPE=Release : 指定构建类型 (优化)
+      #   -DBUILD_SHARED_LIBS=OFF : 构建静态库 (.a)。如需构建共享库 (.so)，请改为 ON。
+      - name: Configure CMake (配置 CMake)
+        run: >
+          cmake -S .
+          -B build
+          -DCMAKE_INSTALL_PREFIX=install
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_SHARED_LIBS=OFF
+
+      # 步骤 4: 使用 CMake 构建 LiteRT
+      #   --build build : 指定构建目录
+      #   --config Release : 指定要构建的配置
+      #   --parallel : 使用多核并行构建以提高速度
+      - name: Build LiteRT (构建 LiteRT)
+        run: cmake --build build --config Release --parallel
+
+      # 步骤 5: 安装 LiteRT (将头文件和库复制到 CMAKE_INSTALL_PREFIX 指定的目录)
+      - name: Install LiteRT (安装 LiteRT)
+        run: cmake --install build --config Release
+
+      # 步骤 6: 归档构建产物 (头文件和库)
+      #   此 Artifact 将包含 'install' 目录的内容
+      - name: Archive Artifacts (归档产物)
+        uses: actions/upload-artifact@v4
+        with:
+          name: litert-linux-x64 # Artifact 的名称
+          path: install/ # 需要上传的目录路径
+
+  # 构建 Windows (x86_64) 平台的任务
+  build-windows:
+    name: 构建 Windows (x64)
+    runs-on: windows-latest # 使用最新的 Windows runner
+    steps:
+      - name: Checkout repository (检出仓库)
+        uses: actions/checkout@v4
+        # with:
+        #   submodules: 'recursive' # 如果 LiteRT 是子模块，取消注释
+
+      # 步骤 2: CMake 配置 (windows-latest runner 已预装 Visual Studio)
+      #   -G "Visual Studio 17 2022" : 指定生成器 (根据需要调整)
+      #   -A x64 : 指定架构
+      #   -DBUILD_SHARED_LIBS=OFF : 构建静态库 (.lib)。如需构建共享库 (.dll)，请改为 ON。
+      - name: Configure CMake (配置 CMake)
+        run: >
+          cmake -S .
+          -B build
+          -G "Visual Studio 17 2022"
+          -A x64
+          -DCMAKE_INSTALL_PREFIX=install
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_SHARED_LIBS=OFF
+
+      # 步骤 3: 构建 LiteRT
+      - name: Build LiteRT (构建 LiteRT)
+        run: cmake --build build --config Release --parallel
+
+      # 步骤 4: 安装 LiteRT
+      - name: Install LiteRT (安装 LiteRT)
+        run: cmake --install build --config Release
+
+      # 步骤 5: 归档构建产物
+      - name: Archive Artifacts (归档产物)
+        uses: actions/upload-artifact@v4
+        with:
+          name: litert-windows-x64
+          path: install/
+
+  # 构建 macOS (Apple Silicon - arm64) 平台的任务
+  build-macos-arm64:
+    name: 构建 macOS (arm64)
+    runs-on: macos-14 # 使用 macOS 14 runner (Apple Silicon)
+    steps:
+      - name: Checkout repository (检出仓库)
+        uses: actions/checkout@v4
+        # with:
+        #   submodules: 'recursive' # 如果 LiteRT 是子模块，取消注释
+
+      # 步骤 2: 安装 CMake (通常已预装，但建议显式安装)
+      - name: Install CMake (安装 CMake)
+        run: brew install cmake
+
+      # 步骤 3: 配置 CMake 以构建 macOS arm64
+      #   -DCMAKE_OSX_ARCHITECTURES=arm64 : 显式指定目标架构为 arm64
+      #   -DBUILD_SHARED_LIBS=OFF : 构建静态库 (.a)。如需构建共享库 (.dylib)，请改为 ON。
+      - name: Configure CMake (配置 CMake)
+        run: >
+          cmake -S .
+          -B build
+          -DCMAKE_INSTALL_PREFIX=install
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES=arm64
+          -DBUILD_SHARED_LIBS=OFF
+
+      # 步骤 4: 构建 LiteRT
+      - name: Build LiteRT (构建 LiteRT)
+        run: cmake --build build --config Release --parallel
+
+      # 步骤 5: 安装 LiteRT
+      - name: Install LiteRT (安装 LiteRT)
+        run: cmake --install build --config Release
+
+      # 步骤 6: 归档构建产物
+      - name: Archive Artifacts (归档产物)
+        uses: actions/upload-artifact@v4
+        with:
+          name: litert-macos-arm64
+          path: install/
+
+  # 构建 macOS (Intel - x86_64) 平台的任务
+  build-macos-x64:
+    name: 构建 macOS (x64)
+    runs-on: macos-12 # 使用 macOS 12 runner (Intel)
+    steps:
+      - name: Checkout repository (检出仓库)
+        uses: actions/checkout@v4
+        # with:
+        #   submodules: 'recursive' # 如果 LiteRT 是子模块，取消注释
+
+      - name: Install CMake (安装 CMake)
+        run: brew install cmake
+
+      # 步骤 3: 配置 CMake 以构建 macOS x86_64
+      #   -DCMAKE_OSX_ARCHITECTURES=x86_64 : 显式指定目标架构为 x86_64
+      #   -DBUILD_SHARED_LIBS=OFF : 构建静态库 (.a)。如需构建共享库 (.dylib)，请改为 ON。
+      - name: Configure CMake (配置 CMake)
+        run: >
+          cmake -S .
+          -B build
+          -DCMAKE_INSTALL_PREFIX=install
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES=x86_64
+          -DBUILD_SHARED_LIBS=OFF
+
+      - name: Build LiteRT (构建 LiteRT)
+        run: cmake --build build --config Release --parallel
+
+      - name: Install LiteRT (安装 LiteRT)
+        run: cmake --install build --config Release
+
+      - name: Archive Artifacts (归档产物)
+        uses: actions/upload-artifact@v4
+        with:
+          name: litert-macos-x64
+          path: install/
+
+  # 构建 Android 平台的任务 (使用 Docker 提供 NDK 环境)
+  build-android:
+    name: 构建 Android (${{ matrix.abi }})
+    runs-on: ubuntu-latest
+    needs: [build-linux] # 可选：如果需要，可以依赖 Linux 构建，否则移除
+    strategy:
+      matrix:
+        # 定义需要构建的 Android ABI (架构)
+        include:
+          - abi: arm64-v8a
+            # 使用预装了 Android NDK 和 CMake 的 Docker 镜像
+            # 你可能需要根据 LiteRT 要求的 NDK 版本寻找或创建合适的镜像
+            docker_image: dockcross/android-arm64
+            toolchain_file_var: CMAKE_TOOLCHAIN_FILE # dockcross 镜像通常会设置此环境变量
+          - abi: armeabi-v7a
+            docker_image: dockcross/android-arm
+            toolchain_file_var: CMAKE_TOOLCHAIN_FILE
+    # 为任务步骤指定使用的 Docker 镜像
+    container: ${{ matrix.docker_image }}
+    steps:
+      # 在容器内检出代码
+      - name: Checkout repository (检出仓库)
+        uses: actions/checkout@v4
+        # with:
+        #   submodules: 'recursive' # 如果 LiteRT 是子模块，取消注释
+
+      # 使用 Docker 镜像提供的工具链文件配置 CMake for Android
+      # 工具链文件的确切路径可能因 Docker 镜像而异。
+      # dockcross 镜像通常会设置 CMAKE_TOOLCHAIN_FILE 环境变量。
+      - name: Configure CMake (配置 CMake - Android ${{ matrix.abi }})
+        run: |
+          # 确保构建目录存在
+          mkdir build install
+          # 运行 CMake 配置
+          cmake -S . \
+                -B build \
+                -DCMAKE_TOOLCHAIN_FILE=$CMAKE_TOOLCHAIN_FILE \
+                -DCMAKE_INSTALL_PREFIX=/github/workspace/install \ # 在容器内使用绝对路径
+                -DCMAKE_BUILD_TYPE=Release \
+                -DANDROID_ABI=${{ matrix.abi }} \
+                -DBUILD_SHARED_LIBS=OFF # 构建静态库 (.a)
+
+      # 在容器内构建 LiteRT
+      - name: Build LiteRT (构建 LiteRT - Android ${{ matrix.abi }})
+        run: cmake --build build --config Release --parallel
+
+      # 在容器内安装 LiteRT
+      - name: Install LiteRT (安装 LiteRT - Android ${{ matrix.abi }})
+        run: cmake --install build --config Release
+
+      # 归档产物 - 路径需要能从宿主 runner 访问
+      # 我们安装到了 /github/workspace/install，它映射到宿主的 workspace
+      - name: Archive Artifacts (归档产物 - Android ${{ matrix.abi }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: litert-android-${{ matrix.abi }}
+          path: install/ # 此路径相对于宿主的 GITHUB_WORKSPACE
+
+  # 构建 iOS (arm64) 平台的任务 - 需要 macOS runner
+  build-ios:
+    name: 构建 iOS (arm64)
+    runs-on: macos-14 # 需要安装了 Xcode 的 macOS runner
+    needs: [build-macos-arm64] # 可选依赖
+    steps:
+      - name: Checkout repository (检出仓库)
+        uses: actions/checkout@v4
+        # with:
+        #   submodules: 'recursive' # 如果 LiteRT 是子模块，取消注释
+
+      - name: Install CMake (安装 CMake)
+        run: brew install cmake
+
+      # 配置 CMake 以构建 iOS arm64
+      # CMake 包含一个基础的 iOS 工具链文件，但复杂项目可能需要自定义文件。
+      #   -DCMAKE_SYSTEM_NAME=iOS : 指定目标系统
+      #   -DCMAKE_OSX_SYSROOT=iphoneos : 指定 SDK (iphoneos 用于真机)
+      #   -DCMAKE_OSX_ARCHITECTURES=arm64 : 指定架构
+      #   -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 : 设置最低 iOS 版本 (根据需要调整)
+      #   -DBUILD_SHARED_LIBS=OFF : 构建静态库 (.a)
+      - name: Configure CMake (配置 CMake - iOS arm64)
+        run: >
+          cmake -S .
+          -B build
+          -G Xcode
+          -DCMAKE_SYSTEM_NAME=iOS
+          -DCMAKE_OSX_SYSROOT=iphoneos
+          -DCMAKE_OSX_ARCHITECTURES=arm64
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+          -DCMAKE_INSTALL_PREFIX=install
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_SHARED_LIBS=OFF
+
+      # 构建 LiteRT for iOS
+      - name: Build LiteRT (构建 LiteRT - iOS arm64)
+        run: cmake --build build --config Release --parallel
+
+      # 安装 LiteRT for iOS
+      - name: Install LiteRT (安装 LiteRT - iOS arm64)
+        run: cmake --install build --config Release
+
+      # 归档 iOS 产物
+      - name: Archive Artifacts (归档产物 - iOS arm64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: litert-ios-arm64
+          path: install/
