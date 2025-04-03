@@ -10,7 +10,7 @@ on:
 jobs:
   build-android:
     name: Build LiteRT for Android (${{ matrix.abi }})
-    runs-on: ubuntu-latest # Use Linux runner for Android cross-compilation
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -26,25 +26,25 @@ jobs:
     - name: Checkout LiteRT source code
       uses: actions/checkout@v4
       with:
-        repository: google-ai-edge/LiteRT # Checkout LiteRT repository
-        # submodules: 'recursive' # Uncomment if LiteRT uses submodules
-        # lfs: true             # Uncomment if LiteRT uses Git LFS
+        repository: google-ai-edge/LiteRT
+        # submodules: 'recursive'
+        # lfs: true
 
-    # ========== CHANGE: Setup Specific Python Version ==========
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11' # Force Python 3.11 where ImpImporter exists
+        python-version: '3.11'
 
-    - name: Set up JDK 11
+    # ========== CHANGE: Setup Java 17 ==========
+    - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
-        distribution: 'temurin' # Or 'zulu', 'adopt'
-        java-version: '11'
+        distribution: 'temurin' # Or other distributions like 'zulu'
+        java-version: '17'      # Use Java 17 required by latest sdkmanager
 
     - name: Install Essential Linux Packages
       run: |
-        set -ex # Exit on error, print commands
+        set -ex
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends \
           build-essential \
@@ -57,21 +57,16 @@ jobs:
           wget \
           patchelf
 
-    # ========== CHANGE: Upgrade pip/setuptools before install ==========
     - name: Install/Upgrade Python Build Tools and Dependencies
       run: |
         set -ex
-        # Upgrade pip and setuptools first in the selected Python env
         python3 -m pip install --upgrade pip setuptools wheel
-        # Now install numpy (and potentially other deps)
-        # Use python3 explicitly since we set up a specific version
-        python3 -m pip install --user numpy==1.23.5 # LiteRT might require this specific version
-        # Add python user bin to PATH for subsequent steps
+        python3 -m pip install --user numpy==1.23.5 # Adjust if needed, but keep for now
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: Install Android SDK and NDK (Following LiteRT Docs)
       run: |
-        set -ex # Exit on error, print commands
+        set -ex
         NDK_VERSION="25.2.9519653"
         CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip"
         export ANDROID_SDK_ROOT="${HOME}/android-sdk"
@@ -85,12 +80,16 @@ jobs:
         export PATH="${PATH}:${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools"
         echo "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin" >> $GITHUB_PATH
         echo "${ANDROID_SDK_ROOT}/platform-tools" >> $GITHUB_PATH
+
+        # Now running with Java 17, these should work
         echo "Updating sdkmanager..."
         sdkmanager --update || echo "sdkmanager update command finished (may show errors, proceeding)"
         echo "Accepting Android SDK licenses..."
         yes | sdkmanager --licenses > /dev/null || echo "Failed to accept licenses automatically. Check logs."
         echo "Installing Android NDK version ${NDK_VERSION} and platform-tools..."
-        sdkmanager "platform-tools" "ndk;${NDK_VERSION}"
+        # Check if NDK/platform-tools are already installed by update/licenses step
+        sdkmanager "platform-tools" "ndk;${NDK_VERSION}" || echo "NDK/Platform Tools install command finished (may already be installed)"
+
         export ANDROID_HOME="${ANDROID_SDK_ROOT}"
         export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}"
         echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
@@ -100,6 +99,7 @@ jobs:
           echo "Error: Android NDK directory not found after installation attempt!"
           echo "Listing contents of ${ANDROID_SDK_ROOT}/ndk/:"
           ls -l "${ANDROID_SDK_ROOT}/ndk/"
+          # It's possible sdkmanager failed silently earlier despite the || echo
           exit 1
         fi
         ls -l "${ANDROID_NDK_HOME}"
@@ -110,7 +110,8 @@ jobs:
     - name: Show Bazel version and Env Vars
       run: |
         bazel --version
-        echo "Python version: $(python3 --version)" # Verify Python version
+        echo "Java version: $(java -version)" # Verify Java version
+        echo "Python version: $(python3 --version)"
         echo "ANDROID_HOME=$ANDROID_HOME"
         echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
         echo "PATH=$PATH"
@@ -119,12 +120,11 @@ jobs:
       shell: bash
       run: |
         set -ex
-        # Use the python3 from the setup-python action
         export PYTHON_BIN_PATH=$(which python3)
         echo "Using PYTHON_BIN_PATH=${PYTHON_BIN_PATH}"
         if [ -f ./configure.py ]; then
           echo "Running ./configure.py"
-          python3 ./configure.py # Run with the selected Python
+          python3 ./configure.py
         elif [ -f ./configure ]; then
           echo "Running ./configure"
           ./configure
