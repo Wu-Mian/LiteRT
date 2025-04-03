@@ -30,6 +30,12 @@ jobs:
         # submodules: 'recursive' # Uncomment if LiteRT uses submodules
         # lfs: true             # Uncomment if LiteRT uses Git LFS
 
+    # ========== CHANGE: Setup Specific Python Version ==========
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11' # Force Python 3.11 where ImpImporter exists
+
     - name: Set up JDK 11
       uses: actions/setup-java@v4
       with:
@@ -49,63 +55,46 @@ jobs:
           unzip \
           git \
           wget \
-          patchelf # Often needed for Bazel Linux builds/tests
+          patchelf
 
-    - name: Install Python Dependencies (Required by Bazel configure/build)
+    # ========== CHANGE: Upgrade pip/setuptools before install ==========
+    - name: Install/Upgrade Python Build Tools and Dependencies
       run: |
         set -ex
-        pip3 install --user numpy==1.23.5 wheel # Use a common numpy version, adjust if needed
+        # Upgrade pip and setuptools first in the selected Python env
+        python3 -m pip install --upgrade pip setuptools wheel
+        # Now install numpy (and potentially other deps)
+        # Use python3 explicitly since we set up a specific version
+        python3 -m pip install --user numpy==1.23.5 # LiteRT might require this specific version
         # Add python user bin to PATH for subsequent steps
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: Install Android SDK and NDK (Following LiteRT Docs)
       run: |
         set -ex # Exit on error, print commands
-
-        # Define versions (Check LiteRT docs for recommended versions if possible)
-        # Using a relatively recent NDK version, adjust if necessary
         NDK_VERSION="25.2.9519653"
-        # Use a known command-line tools version URL, or fetch latest
-        # CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip" # Example older version
-        CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip" # Current latest
-
-        # Set up Android SDK directory
+        CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip"
         export ANDROID_SDK_ROOT="${HOME}/android-sdk"
         mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"
         echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" >> $GITHUB_ENV
-
-        # Download and extract command-line tools
         echo "Downloading Android Command-line Tools..."
         wget -q "${CMDLINE_TOOLS_URL}" -O cmdline-tools.zip
         unzip -q cmdline-tools.zip -d "${ANDROID_SDK_ROOT}/cmdline-tools"
-        # Handle the nested 'cmdline-tools' directory structure
-        mv "${ANDROID_SDK_ROOT}/cmdline-tools/cmdline-tools" "${ANDROID_SDK_ROOT}/cmdline-tools/latest" || true # Might already be 'latest'
+        mv "${ANDROID_SDK_ROOT}/cmdline-tools/cmdline-tools" "${ANDROID_SDK_ROOT}/cmdline-tools/latest" || true
         rm cmdline-tools.zip
-
-        # Add SDK tools to PATH
         export PATH="${PATH}:${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools"
         echo "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "${ANDROID_SDK_ROOT}/platform-tools" >> $GITHUB_PATH # Add platform-tools bin to path
-
-        # Update sdkmanager (important for resolving dependencies)
+        echo "${ANDROID_SDK_ROOT}/platform-tools" >> $GITHUB_PATH
         echo "Updating sdkmanager..."
         sdkmanager --update || echo "sdkmanager update command finished (may show errors, proceeding)"
-
-        # Accept licenses non-interactively
         echo "Accepting Android SDK licenses..."
         yes | sdkmanager --licenses > /dev/null || echo "Failed to accept licenses automatically. Check logs."
-
-        # Install NDK and platform-tools using sdkmanager
         echo "Installing Android NDK version ${NDK_VERSION} and platform-tools..."
         sdkmanager "platform-tools" "ndk;${NDK_VERSION}"
-
-        # Set ANDROID_HOME and ANDROID_NDK_HOME for Bazel
-        export ANDROID_HOME="${ANDROID_SDK_ROOT}" # Some tools might still use ANDROID_HOME
+        export ANDROID_HOME="${ANDROID_SDK_ROOT}"
         export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}"
         echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
         echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
-
-        # Verify NDK installation
         echo "Verifying NDK installation at: ${ANDROID_NDK_HOME}"
         if [ ! -d "${ANDROID_NDK_HOME}" ]; then
           echo "Error: Android NDK directory not found after installation attempt!"
@@ -113,64 +102,44 @@ jobs:
           ls -l "${ANDROID_SDK_ROOT}/ndk/"
           exit 1
         fi
-        ls -l "${ANDROID_NDK_HOME}" # List NDK contents for confirmation
+        ls -l "${ANDROID_NDK_HOME}"
 
     - name: Setup Bazelisk (Manages Bazel versions)
       uses: bazelbuild/setup-bazelisk@v3
-      # It will automatically use .bazelversion if present in LiteRT repo root.
-      # Or specify version:
-      # with:
-      #   bazel-version: '6.4.0' # Check LiteRT requirements
 
     - name: Show Bazel version and Env Vars
       run: |
         bazel --version
+        echo "Python version: $(python3 --version)" # Verify Python version
         echo "ANDROID_HOME=$ANDROID_HOME"
         echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
         echo "PATH=$PATH"
 
-    # LiteRT/TFLite often require configuration before building
     - name: Configure Workspace (Run LiteRT/TFLite setup)
       shell: bash
       run: |
         set -ex
-        # Ensure python3 is used for configuration
+        # Use the python3 from the setup-python action
         export PYTHON_BIN_PATH=$(which python3)
         echo "Using PYTHON_BIN_PATH=${PYTHON_BIN_PATH}"
-
-        # Check for common configuration scripts
         if [ -f ./configure.py ]; then
           echo "Running ./configure.py"
-          # Run non-interactively if possible, accepting defaults.
-          # Flags might be needed depending on configure.py's implementation.
-          python3 ./configure.py
+          python3 ./configure.py # Run with the selected Python
         elif [ -f ./configure ]; then
           echo "Running ./configure"
-          # May need specific environment variables set before running
           ./configure
         else
-          echo "No standard configure script (configure.py or configure) found. Assuming Bazel handles configuration via environment variables (ANDROID_HOME, ANDROID_NDK_HOME)."
-          # If builds fail later, check if manual configuration steps are documented for LiteRT.
+          echo "No standard configure script found. Assuming Bazel handles configuration via env vars."
         fi
 
     - name: Build LiteRT C API for Android (${{ matrix.abi }})
-      shell: bash # Use bash for consistency
+      shell: bash
       run: |
         set -ex
         echo "Building with Bazel config: ${{ matrix.bazel_config }}"
-
-        # --- IMPORTANT: Verify this Bazel target path ---
-        # Check the BUILD file within the LiteRT source tree (e.g., tensorflow/lite/c/BUILD)
-        # Common targets are:
-        # //tensorflow/lite/c:litert_c_api (if LiteRT has a specific target)
-        # //tensorflow/lite/c:tensorflowlite_c (Standard TFLite C API target)
-        # Use the correct one for LiteRT's C API library.
+        # --- VERIFY THIS BAZEL TARGET PATH ---
         LITERT_C_TARGET="//tensorflow/lite/c:litert_c_api" # ASSUMPTION - VERIFY THIS
-        # LITERT_C_TARGET="//tensorflow/lite/c:tensorflowlite_c" # Alternative if the above doesn't exist
-
         echo "Attempting to build Bazel target: ${LITERT_C_TARGET}"
-        # Limit jobs to prevent resource exhaustion on GitHub runners
-        # --verbose_failures provides more detailed error messages
         bazel build ${LITERT_C_TARGET} ${{ matrix.bazel_config }} --verbose_failures --jobs=2
 
     - name: Prepare Artifacts (${{ matrix.abi }})
@@ -179,29 +148,18 @@ jobs:
         set -ex
         ARTIFACT_DIR="litert_build_${{ matrix.artifact_suffix }}"
         mkdir -p "${ARTIFACT_DIR}/lib"
-
-        # --- IMPORTANT: Verify include paths ---
-        # Adjust this path based on where LiteRT places its public C headers relative to the repo root
+        # --- VERIFY INCLUDE PATHS ---
         INCLUDE_SRC_DIR="tensorflow/lite/c"        # ASSUMPTION - VERIFY THIS
-        INCLUDE_DEST="${ARTIFACT_DIR}/include/tensorflow/lite/c" # Keep structure
+        INCLUDE_DEST="${ARTIFACT_DIR}/include/tensorflow/lite/c"
         mkdir -p "${INCLUDE_DEST}"
-
-        # Use the same target as the build step
-        LITERT_C_TARGET="//tensorflow/lite/c:litert_c_api" # ASSUMPTION - VERIFY THIS
-
-        # Find the built library file reliably using bazel cquery
-        # Focus on the static library (.a for Android/Linux)
+        LITERT_C_TARGET="//tensorflow/lite/c:litert_c_api" # Use the same target as build step
         LIB_PATH_QUERY=$(bazel cquery ${LITERT_C_TARGET} ${{ matrix.bazel_config }} --output=files 2>/dev/null | grep -E '\.a$' | head -n 1) || true
-
         if [ -z "$LIB_PATH_QUERY" ] || [ ! -f "$LIB_PATH_QUERY" ]; then
-           echo "Warning: bazel cquery did not find the static library (.a) directly for ${LITERT_C_TARGET}. Searching bazel-bin..."
-           # Fallback: Search for the expected library name pattern
-           SEARCH_PATTERN="*lib$(basename ${LITERT_C_TARGET}).a" # e.g., *liblitert_c_api.a or *libtensorflowlite_c.a
+           echo "Warning: bazel cquery did not find the static library (.a) directly. Searching bazel-bin..."
+           SEARCH_PATTERN="*lib$(basename ${LITERT_C_TARGET}).a"
            LIB_PATH=$(find bazel-bin/ -path "*/_objs/$(basename ${LITERT_C_TARGET})/*" -name "*.a" -print -quit || find bazel-bin/ -name "${SEARCH_PATTERN}" -print -quit)
-
            if [ -z "$LIB_PATH" ] || [ ! -f "$LIB_PATH" ]; then
              echo "Error: Could not find the built library file (.a) in bazel-bin."
-             echo "Listing potential library files in bazel-bin:"
              find bazel-bin/ -name "*.a"
              exit 1
            fi
@@ -210,32 +168,17 @@ jobs:
             LIB_PATH="$LIB_PATH_QUERY"
             echo "Found library via cquery: ${LIB_PATH}"
         fi
-
-        # Copy the found library file
         cp -v "${LIB_PATH}" "${ARTIFACT_DIR}/lib/"
-
-        # Copy public header files
         echo "Copying header files from ${INCLUDE_SRC_DIR} to ${INCLUDE_DEST}"
         if [ -d "${INCLUDE_SRC_DIR}" ]; then
           cp -v "${INCLUDE_SRC_DIR}"/*.h "${INCLUDE_DEST}/"
-          # Optional: Copy other necessary headers (e.g., common) if required by the main C API headers
-          # COMMON_HEADER_SRC="tensorflow/lite/common"
-          # COMMON_HEADER_DEST="${ARTIFACT_DIR}/include/tensorflow/lite/common"
-          # if [ -d "${COMMON_HEADER_SRC}" ]; then
-          #   mkdir -p "${COMMON_HEADER_DEST}"
-          #   cp -v "${COMMON_HEADER_SRC}"/*.h "${COMMON_HEADER_DEST}/"
-          # fi
         else
-           echo "Warning: Header source directory '${INCLUDE_SRC_DIR}' not found. Headers will be missing in the artifact."
+           echo "Warning: Header source directory '${INCLUDE_SRC_DIR}' not found."
         fi
-
-        # Package the artifact as a tar.gz archive
         ARCHIVE_NAME="${ARTIFACT_DIR}.tar.gz"
         echo "Creating archive: ${ARCHIVE_NAME}"
         tar -czvf "${ARCHIVE_NAME}" "${ARTIFACT_DIR}/"
         echo "ARCHIVE_FILE=${ARCHIVE_NAME}" >> $GITHUB_ENV
-
-        # List contents for verification
         echo "Artifact Directory Contents (${ARTIFACT_DIR}):"
         ls -R "${ARTIFACT_DIR}"
 
@@ -243,5 +186,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: litert-lib-${{ matrix.artifact_suffix }}
-        path: ${{ env.ARCHIVE_FILE }} # Upload the specific archive file
+        path: ${{ env.ARCHIVE_FILE }}
         retention-days: 7
