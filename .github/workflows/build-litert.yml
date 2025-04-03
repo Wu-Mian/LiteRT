@@ -23,13 +23,18 @@ jobs:
             artifact_suffix: android-armeabi-v7a
 
     steps:
-    # ========== CHANGE: Enable Submodule Checkout ==========
     - name: Checkout LiteRT source code
       uses: actions/checkout@v4
       with:
         repository: google-ai-edge/LiteRT
-        submodules: 'recursive' # <--- Add this to clone submodules like TensorFlow
-        # lfs: true             # Consider uncommenting if build fails on missing large files later
+        submodules: 'recursive' # Still keep this as the primary method
+        # lfs: true
+
+    # ========== CHANGE: Explicitly Update Submodules ==========
+    - name: Ensure all submodules are initialized
+      run: |
+        set -ex
+        git submodule update --init --recursive
 
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
@@ -118,8 +123,6 @@ jobs:
         echo "Using PYTHON_BIN_PATH=${PYTHON_BIN_PATH}"
         if [ -f ./configure.py ]; then
           echo "Running ./configure.py"
-          # This script often configures paths used in the WORKSPACE,
-          # including potentially adjusting paths for local dependencies.
           python3 ./configure.py
         elif [ -f ./configure ]; then
           echo "Running ./configure"
@@ -134,13 +137,12 @@ jobs:
         set -ex
         echo "Building with Bazel config: ${{ matrix.bazel_config }}"
         # --- VERIFY THIS BAZEL TARGET PATH ---
-        # Double-check this path in the (now checked out) third_party/tensorflow directory
-        # or within the main LiteRT BUILD files that depend on TF Lite C API.
         LITERT_C_TARGET="//tensorflow/lite/c:litert_c_api" # ASSUMPTION - VERIFY THIS
-        # Alternative if LiteRT uses the standard TFLite C API directly:
-        # LITERT_C_TARGET="//tensorflow/lite/c:tensorflowlite_c"
+        # LITERT_C_TARGET="//tensorflow/lite/c:tensorflowlite_c" # Alternative?
 
         echo "Attempting to build Bazel target: ${LITERT_C_TARGET}"
+        # Run clean first? Sometimes helpful after dependency issues.
+        # bazel clean --expunge # Uncomment cautiously, increases build time
         bazel build ${LITERT_C_TARGET} ${{ matrix.bazel_config }} --verbose_failures --jobs=2
 
     - name: Prepare Artifacts (${{ matrix.abi }})
@@ -150,7 +152,6 @@ jobs:
         ARTIFACT_DIR="litert_build_${{ matrix.artifact_suffix }}"
         mkdir -p "${ARTIFACT_DIR}/lib"
         # --- VERIFY INCLUDE PATHS ---
-        # Verify where the public C API headers for LiteRT are located
         INCLUDE_SRC_DIR="tensorflow/lite/c"        # ASSUMPTION - VERIFY THIS
         INCLUDE_DEST="${ARTIFACT_DIR}/include/tensorflow/lite/c"
         mkdir -p "${INCLUDE_DEST}"
