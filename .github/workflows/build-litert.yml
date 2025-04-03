@@ -1,292 +1,214 @@
-# .github/workflows/build-litert.yml
-#
-# 使用 CMake 构建 LiteRT 跨平台库的 GitHub Actions 工作流
-#
-name: Build LiteRT Libraries (构建 LiteRT 库)
+name: Build LiteRT Libraries
 
-# 控制工作流的触发时机
 on:
-  # 在向 main 分支推送时触发
   push:
-    branches: [ "main" ]
-  # 在向 main 分支发起 Pull Request 时触发
+    branches: [ main ] # 在主分支推送时触发
   pull_request:
-    branches: [ "main" ]
-  # 允许在 Actions 选项卡手动触发此工作流
-  workflow_dispatch:
+    branches: [ main ] # 在向主分支发起 PR 时触发
+  workflow_dispatch:   # 允许手动触发
 
 jobs:
-  # 构建 Linux (x86_64) 平台的任务
-  build-linux:
-    name: 构建 Linux (x64)
-    runs-on: ubuntu-latest # 使用最新的 Ubuntu runner
-    steps:
-      # 步骤 1: 检出仓库代码
-      - name: Checkout repository (检出仓库)
-        uses: actions/checkout@v4
-        # 如果 LiteRT 是你仓库中的子模块，请取消下面这行的注释:
-        # with:
-        #   submodules: 'recursive'
-
-      # 步骤 2: 安装构建依赖 (CMake, C++ 编译器)
-      - name: Install dependencies (安装依赖)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential
-
-      # 步骤 3: 使用 CMake 配置 LiteRT 构建
-      #   -S . : 指定源代码目录 (当前目录)
-      #   -B build : 指定构建目录
-      #   -DCMAKE_INSTALL_PREFIX=install : 设置头文件和库的安装路径
-      #   -DCMAKE_BUILD_TYPE=Release : 指定构建类型 (优化)
-      #   -DBUILD_SHARED_LIBS=OFF : 构建静态库 (.a)。如需构建共享库 (.so)，请改为 ON。
-      - name: Configure CMake (配置 CMake)
-        run: >
-          cmake -S .
-          -B build
-          -DCMAKE_INSTALL_PREFIX=install
-          -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_SHARED_LIBS=OFF
-
-      # 步骤 4: 使用 CMake 构建 LiteRT
-      #   --build build : 指定构建目录
-      #   --config Release : 指定要构建的配置
-      #   --parallel : 使用多核并行构建以提高速度
-      - name: Build LiteRT (构建 LiteRT)
-        run: cmake --build build --config Release --parallel
-
-      # 步骤 5: 安装 LiteRT (将头文件和库复制到 CMAKE_INSTALL_PREFIX 指定的目录)
-      - name: Install LiteRT (安装 LiteRT)
-        run: cmake --install build --config Release
-
-      # 步骤 6: 归档构建产物 (头文件和库)
-      #   此 Artifact 将包含 'install' 目录的内容
-      - name: Archive Artifacts (归档产物)
-        uses: actions/upload-artifact@v4
-        with:
-          name: litert-linux-x64 # Artifact 的名称
-          path: install/ # 需要上传的目录路径
-
-  # 构建 Windows (x86_64) 平台的任务
-  build-windows:
-    name: 构建 Windows (x64)
-    runs-on: windows-latest # 使用最新的 Windows runner
-    steps:
-      - name: Checkout repository (检出仓库)
-        uses: actions/checkout@v4
-        # with:
-        #   submodules: 'recursive' # 如果 LiteRT 是子模块，取消注释
-
-      # 步骤 2: CMake 配置 (windows-latest runner 已预装 Visual Studio)
-      #   -G "Visual Studio 17 2022" : 指定生成器 (根据需要调整)
-      #   -A x64 : 指定架构
-      #   -DBUILD_SHARED_LIBS=OFF : 构建静态库 (.lib)。如需构建共享库 (.dll)，请改为 ON。
-      - name: Configure CMake (配置 CMake)
-        run: >
-          cmake -S .
-          -B build
-          -G "Visual Studio 17 2022"
-          -A x64
-          -DCMAKE_INSTALL_PREFIX=install
-          -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_SHARED_LIBS=OFF
-
-      # 步骤 3: 构建 LiteRT
-      - name: Build LiteRT (构建 LiteRT)
-        run: cmake --build build --config Release --parallel
-
-      # 步骤 4: 安装 LiteRT
-      - name: Install LiteRT (安装 LiteRT)
-        run: cmake --install build --config Release
-
-      # 步骤 5: 归档构建产物
-      - name: Archive Artifacts (归档产物)
-        uses: actions/upload-artifact@v4
-        with:
-          name: litert-windows-x64
-          path: install/
-
-  # 构建 macOS (Apple Silicon - arm64) 平台的任务
-  build-macos-arm64:
-    name: 构建 macOS (arm64)
-    runs-on: macos-14 # 使用 macOS 14 runner (Apple Silicon)
-    steps:
-      - name: Checkout repository (检出仓库)
-        uses: actions/checkout@v4
-        # with:
-        #   submodules: 'recursive' # 如果 LiteRT 是子模块，取消注释
-
-      # 步骤 2: 安装 CMake (通常已预装，但建议显式安装)
-      - name: Install CMake (安装 CMake)
-        run: brew install cmake
-
-      # 步骤 3: 配置 CMake 以构建 macOS arm64
-      #   -DCMAKE_OSX_ARCHITECTURES=arm64 : 显式指定目标架构为 arm64
-      #   -DBUILD_SHARED_LIBS=OFF : 构建静态库 (.a)。如需构建共享库 (.dylib)，请改为 ON。
-      - name: Configure CMake (配置 CMake)
-        run: >
-          cmake -S .
-          -B build
-          -DCMAKE_INSTALL_PREFIX=install
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_OSX_ARCHITECTURES=arm64
-          -DBUILD_SHARED_LIBS=OFF
-
-      # 步骤 4: 构建 LiteRT
-      - name: Build LiteRT (构建 LiteRT)
-        run: cmake --build build --config Release --parallel
-
-      # 步骤 5: 安装 LiteRT
-      - name: Install LiteRT (安装 LiteRT)
-        run: cmake --install build --config Release
-
-      # 步骤 6: 归档构建产物
-      - name: Archive Artifacts (归档产物)
-        uses: actions/upload-artifact@v4
-        with:
-          name: litert-macos-arm64
-          path: install/
-
-  # 构建 macOS (Intel - x86_64) 平台的任务
-  build-macos-x64:
-    name: 构建 macOS (x64)
-    runs-on: macos-12 # 使用 macOS 12 runner (Intel)
-    steps:
-      - name: Checkout repository (检出仓库)
-        uses: actions/checkout@v4
-        # with:
-        #   submodules: 'recursive' # 如果 LiteRT 是子模块，取消注释
-
-      - name: Install CMake (安装 CMake)
-        run: brew install cmake
-
-      # 步骤 3: 配置 CMake 以构建 macOS x86_64
-      #   -DCMAKE_OSX_ARCHITECTURES=x86_64 : 显式指定目标架构为 x86_64
-      #   -DBUILD_SHARED_LIBS=OFF : 构建静态库 (.a)。如需构建共享库 (.dylib)，请改为 ON。
-      - name: Configure CMake (配置 CMake)
-        run: >
-          cmake -S .
-          -B build
-          -DCMAKE_INSTALL_PREFIX=install
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_OSX_ARCHITECTURES=x86_64
-          -DBUILD_SHARED_LIBS=OFF
-
-      - name: Build LiteRT (构建 LiteRT)
-        run: cmake --build build --config Release --parallel
-
-      - name: Install LiteRT (安装 LiteRT)
-        run: cmake --install build --config Release
-
-      - name: Archive Artifacts (归档产物)
-        uses: actions/upload-artifact@v4
-        with:
-          name: litert-macos-x64
-          path: install/
-
-  # 构建 Android 平台的任务 (使用 Docker 提供 NDK 环境)
-  build-android:
-    name: 构建 Android (${{ matrix.abi }})
-    runs-on: ubuntu-latest
-    needs: [build-linux] # 可选：如果需要，可以依赖 Linux 构建，否则移除
+  build:
+    name: Build LiteRT for ${{ matrix.target_name }}
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false # 即使一个构建失败，其他构建也会继续
       matrix:
-        # 定义需要构建的 Android ABI (架构)
         include:
-          - abi: arm64-v8a
-            # 使用预装了 Android NDK 和 CMake 的 Docker 镜像
-            # 你可能需要根据 LiteRT 要求的 NDK 版本寻找或创建合适的镜像
-            docker_image: dockcross/android-arm64
-            toolchain_file_var: CMAKE_TOOLCHAIN_FILE # dockcross 镜像通常会设置此环境变量
-          - abi: armeabi-v7a
-            docker_image: dockcross/android-arm
-            toolchain_file_var: CMAKE_TOOLCHAIN_FILE
-    # 为任务步骤指定使用的 Docker 镜像
-    container: ${{ matrix.docker_image }}
+          # --- Linux ---
+          - os: ubuntu-latest
+            target_name: Linux-x64
+            bazel_version: 6.4.0 # 或 LiteRT 兼容的最新 Bazel 版本
+            bazel_config: "--config=linux_x86_64 -c opt" # 优化编译
+            artifact_suffix: linux-x64
+            setup_script: |
+              sudo apt-get update && sudo apt-get install -y build-essential python3-dev curl zip
+
+          # --- macOS ---
+          - os: macos-latest # 通常包含 Xcode
+            target_name: macOS-Universal # x86_64 + arm64
+            bazel_version: 6.4.0
+            # 使用 --macos_cpus 构建 Universal Binary
+            bazel_config: "--macos_cpus=x86_64,arm64 --config=macos -c opt"
+            artifact_suffix: macos-universal
+            setup_script: "" # macOS runner 通常包含必要工具
+
+          # --- Windows ---
+          - os: windows-latest # 通常包含 Visual Studio Build Tools
+            target_name: Windows-x64
+            bazel_version: 6.4.0
+            bazel_config: "--config=windows_x86_64 -c opt"
+            artifact_suffix: windows-x64
+            setup_script: "" # Windows runner 通常包含必要工具, Bazel 会尝试寻找 MSVC
+
+          # --- Android --- (使用 Linux runner 进行交叉编译)
+          - os: ubuntu-latest
+            target_name: Android-arm64-v8a
+            bazel_version: 6.4.0
+            bazel_config: "--config=android_arm64 -c opt"
+            artifact_suffix: android-arm64-v8a
+            setup_script: |
+              sudo apt-get update && sudo apt-get install -y openjdk-11-jdk python3-dev curl zip
+              # 安装 Android SDK 和 NDK (示例, 可能需要调整版本)
+              export ANDROID_HOME=$HOME/android-sdk
+              export ANDROID_NDK_HOME=$ANDROID_HOME/ndk-bundle # 或指定 NDK 版本路径
+              mkdir -p $ANDROID_HOME
+              # 下载并解压 Android 命令行工具
+              wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O cmdline-tools.zip
+              unzip cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
+              mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+              # 设置 PATH
+              export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+              # 接受许可证并安装 NDK 和 Platform Tools
+              yes | sdkmanager --licenses > /dev/null
+              sdkmanager "platform-tools" "ndk;25.2.9519653" # 使用特定 NDK 版本
+              export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653 # 更新 NDK 路径
+              # 验证 NDK 路径 (可选)
+              ls $ANDROID_NDK_HOME
+              echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
+              echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+
+          - os: ubuntu-latest
+            target_name: Android-armeabi-v7a
+            bazel_version: 6.4.0
+            bazel_config: "--config=android_arm -c opt"
+            artifact_suffix: android-armeabi-v7a
+            # setup_script 与 arm64-v8a 相同 (可以优化为共享步骤)
+            setup_script: |
+              sudo apt-get update && sudo apt-get install -y openjdk-11-jdk python3-dev curl zip
+              export ANDROID_HOME=$HOME/android-sdk
+              export ANDROID_NDK_HOME=$ANDROID_HOME/ndk-bundle
+              mkdir -p $ANDROID_HOME
+              wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O cmdline-tools.zip
+              unzip cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
+              mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+              export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+              yes | sdkmanager --licenses > /dev/null
+              sdkmanager "platform-tools" "ndk;25.2.9519653"
+              export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653
+              ls $ANDROID_NDK_HOME
+              echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
+              echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+
+          # --- iOS --- (使用 macOS runner 进行交叉编译)
+          - os: macos-latest
+            target_name: iOS-arm64
+            bazel_version: 6.4.0
+            # 需要 Xcode 和 iOS SDK
+            bazel_config: "--config=ios_arm64 -c opt"
+            artifact_suffix: ios-arm64
+            setup_script: "" # macOS runner 通常包含 Xcode
+
+          - os: macos-latest
+            target_name: iOS-Simulator-arm64 # M1/M2 Mac 上的模拟器
+            bazel_version: 6.4.0
+            bazel_config: "--config=ios_sim_arm64 -c opt"
+            artifact_suffix: ios-simulator-arm64
+            setup_script: ""
+
+          - os: macos-latest
+            target_name: iOS-Simulator-x86_64 # Intel Mac 上的模拟器
+            bazel_version: 6.4.0
+            bazel_config: "--config=ios_x86_64 -c opt"
+            artifact_suffix: ios-simulator-x86_64
+            setup_script: ""
+
     steps:
-      # 在容器内检出代码
-      - name: Checkout repository (检出仓库)
-        uses: actions/checkout@v4
-        # with:
-        #   submodules: 'recursive' # 如果 LiteRT 是子模块，取消注释
+    - name: Checkout LiteRT source code
+      uses: actions/checkout@v4
+      with:
+        # 如果 LiteRT 使用了 Git LFS, 需要启用
+        # lfs: true
+        # 如果 LiteRT 依赖 Git Submodules, 需要递归检出
+        # submodules: 'recursive'
+        repository: google-ai-edge/LiteRT # 明确指定仓库
 
-      # 使用 Docker 镜像提供的工具链文件配置 CMake for Android
-      # 工具链文件的确切路径可能因 Docker 镜像而异。
-      # dockcross 镜像通常会设置 CMAKE_TOOLCHAIN_FILE 环境变量。
-      - name: Configure CMake (配置 CMake - Android ${{ matrix.abi }})
-        run: |
-          # 确保构建目录存在
-          mkdir build install
-          # 运行 CMake 配置
-          cmake -S . \
-                -B build \
-                -DCMAKE_TOOLCHAIN_FILE=$CMAKE_TOOLCHAIN_FILE \
-                -DCMAKE_INSTALL_PREFIX=/github/workspace/install \ # 在容器内使用绝对路径
-                -DCMAKE_BUILD_TYPE=Release \
-                -DANDROID_ABI=${{ matrix.abi }} \
-                -DBUILD_SHARED_LIBS=OFF # 构建静态库 (.a)
+    - name: Setup Platform Dependencies
+      if: matrix.setup_script != ''
+      shell: bash # 确保在 Linux/macOS 上使用 bash
+      run: ${{ matrix.setup_script }}
 
-      # 在容器内构建 LiteRT
-      - name: Build LiteRT (构建 LiteRT - Android ${{ matrix.abi }})
-        run: cmake --build build --config Release --parallel
+    # Windows 需要特殊处理路径和环境设置 (如果 Bazel 自动查找失败)
+    # - name: Setup MSVC environment (Windows only)
+    #   if: runner.os == 'Windows'
+    #   uses: ilammy/msvc-dev-cmd@v1
 
-      # 在容器内安装 LiteRT
-      - name: Install LiteRT (安装 LiteRT - Android ${{ matrix.abi }})
-        run: cmake --install build --config Release
+    - name: Setup Bazelisk (Manages Bazel versions)
+      uses: bazelbuild/setup-bazelisk@v3
+      # Bazelisk 会读取项目根目录的 .bazelversion 文件 (如果存在)
+      # 或者你可以强制指定版本如下:
+      # with:
+      #   bazel-version: ${{ matrix.bazel_version }}
 
-      # 归档产物 - 路径需要能从宿主 runner 访问
-      # 我们安装到了 /github/workspace/install，它映射到宿主的 workspace
-      - name: Archive Artifacts (归档产物 - Android ${{ matrix.abi }})
-        uses: actions/upload-artifact@v4
-        with:
-          name: litert-android-${{ matrix.abi }}
-          path: install/ # 此路径相对于宿主的 GITHUB_WORKSPACE
+    # 某些 Bazel 项目 (尤其是 TensorFlow 相关) 需要配置工作区
+    # LiteRT 可能继承了 TFLite 的这个需求, 检查是否有 configure.py 或类似脚本
+    # 如果需要, 在这里运行配置步骤, 并设置必要的环境变量 (如 PYTHON_BIN_PATH)
+    # - name: Configure Workspace (if necessary)
+    #   run: |
+    #     # export PYTHON_BIN_PATH=$(which python3) # 示例
+    #     # ./configure # 或者其他配置命令
 
-  # 构建 iOS (arm64) 平台的任务 - 需要 macOS runner
-  build-ios:
-    name: 构建 iOS (arm64)
-    runs-on: macos-14 # 需要安装了 Xcode 的 macOS runner
-    needs: [build-macos-arm64] # 可选依赖
-    steps:
-      - name: Checkout repository (检出仓库)
-        uses: actions/checkout@v4
-        # with:
-        #   submodules: 'recursive' # 如果 LiteRT 是子模块，取消注释
+    - name: Build LiteRT C API Library
+      shell: bash # 在 Windows 上也使用 bash (Git Bash) 以统一命令
+      run: |
+        echo "Building with Bazel config: ${{ matrix.bazel_config }}"
+        # Bazel 构建命令, 目标是 C API 库
+        # //tensorflow/lite/c:litert_c_api 是 LiteRT C API 的目标路径 (基于 TFLite 结构)
+        # --verbose_failures 提供更详细的错误输出
+        # --jobs=2 限制并发任务数，避免资源耗尽 (根据需要调整)
+        bazel build //tensorflow/lite/c:litert_c_api ${{ matrix.bazel_config }} --verbose_failures --jobs=2
 
-      - name: Install CMake (安装 CMake)
-        run: brew install cmake
+    - name: Prepare Artifacts
+      shell: bash
+      run: |
+        # 创建用于存放构建产物的目录结构
+        ARTIFACT_DIR="litert_build_${{ matrix.artifact_suffix }}"
+        mkdir -p "${ARTIFACT_DIR}/lib"
+        mkdir -p "${ARTIFACT_DIR}/include/tensorflow/lite/c" # 创建 LiteRT 头文件所需路径
 
-      # 配置 CMake 以构建 iOS arm64
-      # CMake 包含一个基础的 iOS 工具链文件，但复杂项目可能需要自定义文件。
-      #   -DCMAKE_SYSTEM_NAME=iOS : 指定目标系统
-      #   -DCMAKE_OSX_SYSROOT=iphoneos : 指定 SDK (iphoneos 用于真机)
-      #   -DCMAKE_OSX_ARCHITECTURES=arm64 : 指定架构
-      #   -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 : 设置最低 iOS 版本 (根据需要调整)
-      #   -DBUILD_SHARED_LIBS=OFF : 构建静态库 (.a)
-      - name: Configure CMake (配置 CMake - iOS arm64)
-        run: >
-          cmake -S .
-          -B build
-          -G Xcode
-          -DCMAKE_SYSTEM_NAME=iOS
-          -DCMAKE_OSX_SYSROOT=iphoneos
-          -DCMAKE_OSX_ARCHITECTURES=arm64
-          -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
-          -DCMAKE_INSTALL_PREFIX=install
-          -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_SHARED_LIBS=OFF
+        # 查找构建生成的库文件 (通常在 bazel-bin 目录下)
+        # 注意: 文件名和扩展名可能因平台和构建类型(静态/动态)而异
+        # 这里假设是静态库 (.a / .lib)
+        LIB_PATH=$(bazel cquery //tensorflow/lite/c:litert_c_api ${{ matrix.bazel_config }} --output=files)
+        echo "Found library file: ${LIB_PATH}"
 
-      # 构建 LiteRT for iOS
-      - name: Build LiteRT (构建 LiteRT - iOS arm64)
-        run: cmake --build build --config Release --parallel
+        # 检查 LIB_PATH 是否为空或者无效
+        if [ -z "$LIB_PATH" ] || [ ! -f "$LIB_PATH" ]; then
+          echo "Error: Could not find built library file for target //tensorflow/lite/c:litert_c_api"
+          # 尝试查找 bazel-bin 目录下的文件作为备选方案
+          echo "Searching in bazel-bin..."
+          find bazel-bin/ -name "liblitert_c_api.*" # 打印找到的文件
+          # 如果需要更健壮的查找，可能需要调整 find 命令
+          LIB_PATH=$(find bazel-bin/ -path '*/tensorflow/lite/c/*liblitert_c_api.*' -print -quit)
+          if [ -z "$LIB_PATH" ] || [ ! -f "$LIB_PATH" ]; then
+             echo "Error: Still could not find library file in bazel-bin."
+             exit 1
+          fi
+          echo "Using found library: ${LIB_PATH}"
+        fi
 
-      # 安装 LiteRT for iOS
-      - name: Install LiteRT (安装 LiteRT - iOS arm64)
-        run: cmake --install build --config Release
+        # 复制库文件
+        cp "${LIB_PATH}" "${ARTIFACT_DIR}/lib/"
 
-      # 归档 iOS 产物
-      - name: Archive Artifacts (归档产物 - iOS arm64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: litert-ios-arm64
-          path: install/
+        # 复制头文件 (从源代码树复制)
+        # 需要根据 LiteRT 的实际头文件位置调整
+        cp tensorflow/lite/c/*.h "${ARTIFACT_DIR}/include/tensorflow/lite/c/"
+
+        # （可选）复制其他必要的头文件，例如 TFLite Common 头文件
+        # cp tensorflow/lite/common/*.h "${ARTIFACT_DIR}/include/tensorflow/lite/common/" # 示例
+
+        # 打包成压缩文件
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          7z a "${ARTIFACT_DIR}.zip" "${ARTIFACT_DIR}/"
+        else
+          tar -czvf "${ARTIFACT_DIR}.tar.gz" "${ARTIFACT_DIR}/"
+        fi
+        echo "ARCHIVE_NAME=${ARTIFACT_DIR}" >> $GITHUB_ENV # 供下一步使用
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: litert-libs-${{ matrix.artifact_suffix }}
+        path: | # 上传压缩包
+          ${{ env.ARCHIVE_NAME }}.* # 使用通配符匹配 .zip 或 .tar.gz
+        retention-days: 7 # 设置产物保留时间
