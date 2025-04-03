@@ -28,38 +28,35 @@ jobs:
       with:
         repository: google-ai-edge/LiteRT
         submodules: 'recursive'
-        # lfs: true
+        fetch-depth: 0 # Fetch all history to ensure submodule commits are available
 
-    - name: Ensure all submodules are initialized
+    - name: Ensure all submodules are initialized and check status
       run: |
         set -ex
-        git submodule update --init --recursive
+        echo "--- Git Version ---"
+        git --version
+        echo "--- Updating submodules ---"
+        git submodule update --init --recursive --force # Add --force for good measure
+        echo "--- Checking submodule status (very important!) ---"
+        git submodule status --recursive || echo "Submodule status command failed"
+        echo "--- Checking specific submodule directory ---"
+        ls -l third_party/tensorflow/ || echo "third_party/tensorflow directory not found"
+        echo "--- Checking commit hash of tensorflow submodule ---"
+        (cd third_party/tensorflow && git rev-parse HEAD) || echo "Could not get commit hash for tensorflow submodule"
 
-    # ========== CHANGE: Verify Critical File Existence ==========
-    - name: Verify existence of python_wheel.bzl within potential XLA path
+    - name: Debug File Structure and WORKSPACEs
       run: |
         set -ex
-        echo "Checking for python_wheel.bzl..."
-        # Assuming XLA is within the tensorflow submodule, common paths:
-        XLA_PY_PATH1="third_party/tensorflow/compiler/xla/third_party/py/python_wheel.bzl"
-        XLA_PY_PATH2="third_party/tensorflow/third_party/xla/third_party/py/python_wheel.bzl" # Another possibility
-        # Add other potential relative paths if needed based on LiteRT/TF structure
-        if [ -f "$XLA_PY_PATH1" ]; then
-          echo "Found file at: $XLA_PY_PATH1"
-          ls -l "$XLA_PY_PATH1"
-        elif [ -f "$XLA_PY_PATH2" ]; then
-          echo "Found file at: $XLA_PY_PATH2"
-          ls -l "$XLA_PY_PATH2"
-        else
-          echo "WARNING: Could not find python_wheel.bzl at common expected paths."
-          echo "Listing contents of third_party/tensorflow/ directory:"
-          ls -l third_party/tensorflow/
-          echo "Listing contents of third_party/tensorflow/compiler/ (if exists):"
-          ls -l third_party/tensorflow/compiler/ || true
-          echo "Listing contents of third_party/tensorflow/third_party/ (if exists):"
-          ls -l third_party/tensorflow/third_party/ || true
-        fi
-        # Even if not found above, proceed to build, as Bazel might find it via WORKSPACE definitions.
+        echo "--- Verifying python_wheel.bzl using find ---"
+        find . -name "python_wheel.bzl" -ls || echo "python_wheel.bzl not found anywhere via find."
+
+        echo "--- Displaying LiteRT WORKSPACE (searching for xla definition) ---"
+        cat WORKSPACE || echo "LiteRT WORKSPACE file not found or cannot be read."
+        echo "--- Searching LiteRT WORKSPACE for 'xla' ---"
+        grep -i 'xla' WORKSPACE || echo "'xla' not found in LiteRT WORKSPACE"
+
+        echo "--- Displaying TensorFlow WORKSPACE ---"
+        cat third_party/tensorflow/WORKSPACE || echo "TensorFlow WORKSPACE file not found or cannot be read."
 
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
@@ -94,7 +91,8 @@ jobs:
         python3 -m pip install --user numpy==1.23.5 # Adjust if needed
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-    - name: Install Android SDK and NDK (Following LiteRT Docs)
+    - name: Install Android SDK and NDK
+      # (Keep this step as is)
       run: |
         set -ex
         NDK_VERSION="25.2.9519653"
@@ -132,6 +130,7 @@ jobs:
       uses: bazelbuild/setup-bazelisk@v3
 
     - name: Show Bazel version and Env Vars
+      # (Keep this step as is)
       run: |
         bazel --version
         echo "Java version: $(java -version)"
@@ -140,16 +139,15 @@ jobs:
         echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
         echo "PATH=$PATH"
 
-    - name: Configure Workspace (Run LiteRT/TFLite setup)
+    - name: Configure Workspace
+      # (Keep this step as is)
       shell: bash
-      # ========== CHANGE: Add pipefail to catch errors within configure ==========
       run: |
-        set -exo pipefail # Exit on error, print commands, catch pipe errors
+        set -exo pipefail
         export PYTHON_BIN_PATH=$(which python3)
         echo "Using PYTHON_BIN_PATH=${PYTHON_BIN_PATH}"
         if [ -f ./configure.py ]; then
           echo "Running ./configure.py"
-          # Execute and allow full output to be printed
           python3 ./configure.py
           echo "Finished running ./configure.py (Check output above for errors)"
         elif [ -f ./configure ]; then
@@ -157,7 +155,7 @@ jobs:
           ./configure
           echo "Finished running ./configure (Check output above for errors)"
         else
-          echo "No standard configure script found. Assuming Bazel handles configuration via env vars and WORKSPACE."
+          echo "No standard configure script found."
         fi
 
     - name: Build LiteRT C API for Android (${{ matrix.abi }})
@@ -165,25 +163,36 @@ jobs:
       run: |
         set -ex
         echo "Building with Bazel config: ${{ matrix.bazel_config }}"
-        # --- VERIFY THIS BAZEL TARGET PATH ---
         LITERT_C_TARGET="//tensorflow/lite/c:litert_c_api" # ASSUMPTION - VERIFY THIS
 
         echo "Attempting to build Bazel target: ${LITERT_C_TARGET}"
 
-        # ========== CHANGE: Force clean Bazel cache ==========
         echo "Cleaning Bazel cache..."
         bazel clean --expunge || echo "Bazel clean failed, proceeding anyway..."
 
         echo "Starting build..."
+        # Try adding --experimental_repository_resolved_file to see how bazel resolves repos
+        bazel build ${LITERT_C_TARGET} ${{ matrix.bazel_config }} \
+          --verbose_failures \
+          --jobs=2 \
+          --experimental_verbose_module_repo_mapping \
+          --experimental_repository_resolved_file=resolved.bzl || echo "Build failed. See logs above."
+
+        # If the build fails, try printing the generated resolved file
+        echo "--- Contents of resolved.bzl (if generated) ---"
+        cat resolved.bzl || echo "resolved.bzl not found or build did not reach that point."
+
+        # Ensure the script exits with an error if bazel build failed earlier
+        # Re-run build and let it fail naturally if the '|| echo' above masked the error
         bazel build ${LITERT_C_TARGET} ${{ matrix.bazel_config }} --verbose_failures --jobs=2
 
     - name: Prepare Artifacts (${{ matrix.abi }})
+      # (Keep this step as is)
       shell: bash
       run: |
         set -ex
         ARTIFACT_DIR="litert_build_${{ matrix.artifact_suffix }}"
         mkdir -p "${ARTIFACT_DIR}/lib"
-        # --- VERIFY INCLUDE PATHS ---
         INCLUDE_SRC_DIR="tensorflow/lite/c"        # ASSUMPTION - VERIFY THIS
         INCLUDE_DEST="${ARTIFACT_DIR}/include/tensorflow/lite/c"
         mkdir -p "${INCLUDE_DEST}"
@@ -218,6 +227,7 @@ jobs:
         ls -R "${ARTIFACT_DIR}"
 
     - name: Upload Android Artifact (${{ matrix.abi }})
+      # (Keep this step as is)
       uses: actions/upload-artifact@v4
       with:
         name: litert-lib-${{ matrix.artifact_suffix }}
