@@ -27,14 +27,39 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: google-ai-edge/LiteRT
-        submodules: 'recursive' # Still keep this as the primary method
+        submodules: 'recursive'
         # lfs: true
 
-    # ========== CHANGE: Explicitly Update Submodules ==========
     - name: Ensure all submodules are initialized
       run: |
         set -ex
         git submodule update --init --recursive
+
+    # ========== CHANGE: Verify Critical File Existence ==========
+    - name: Verify existence of python_wheel.bzl within potential XLA path
+      run: |
+        set -ex
+        echo "Checking for python_wheel.bzl..."
+        # Assuming XLA is within the tensorflow submodule, common paths:
+        XLA_PY_PATH1="third_party/tensorflow/compiler/xla/third_party/py/python_wheel.bzl"
+        XLA_PY_PATH2="third_party/tensorflow/third_party/xla/third_party/py/python_wheel.bzl" # Another possibility
+        # Add other potential relative paths if needed based on LiteRT/TF structure
+        if [ -f "$XLA_PY_PATH1" ]; then
+          echo "Found file at: $XLA_PY_PATH1"
+          ls -l "$XLA_PY_PATH1"
+        elif [ -f "$XLA_PY_PATH2" ]; then
+          echo "Found file at: $XLA_PY_PATH2"
+          ls -l "$XLA_PY_PATH2"
+        else
+          echo "WARNING: Could not find python_wheel.bzl at common expected paths."
+          echo "Listing contents of third_party/tensorflow/ directory:"
+          ls -l third_party/tensorflow/
+          echo "Listing contents of third_party/tensorflow/compiler/ (if exists):"
+          ls -l third_party/tensorflow/compiler/ || true
+          echo "Listing contents of third_party/tensorflow/third_party/ (if exists):"
+          ls -l third_party/tensorflow/third_party/ || true
+        fi
+        # Even if not found above, proceed to build, as Bazel might find it via WORKSPACE definitions.
 
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
@@ -117,16 +142,20 @@ jobs:
 
     - name: Configure Workspace (Run LiteRT/TFLite setup)
       shell: bash
+      # ========== CHANGE: Add pipefail to catch errors within configure ==========
       run: |
-        set -ex
+        set -exo pipefail # Exit on error, print commands, catch pipe errors
         export PYTHON_BIN_PATH=$(which python3)
         echo "Using PYTHON_BIN_PATH=${PYTHON_BIN_PATH}"
         if [ -f ./configure.py ]; then
           echo "Running ./configure.py"
+          # Execute and allow full output to be printed
           python3 ./configure.py
+          echo "Finished running ./configure.py (Check output above for errors)"
         elif [ -f ./configure ]; then
           echo "Running ./configure"
           ./configure
+          echo "Finished running ./configure (Check output above for errors)"
         else
           echo "No standard configure script found. Assuming Bazel handles configuration via env vars and WORKSPACE."
         fi
@@ -138,11 +167,14 @@ jobs:
         echo "Building with Bazel config: ${{ matrix.bazel_config }}"
         # --- VERIFY THIS BAZEL TARGET PATH ---
         LITERT_C_TARGET="//tensorflow/lite/c:litert_c_api" # ASSUMPTION - VERIFY THIS
-        # LITERT_C_TARGET="//tensorflow/lite/c:tensorflowlite_c" # Alternative?
 
         echo "Attempting to build Bazel target: ${LITERT_C_TARGET}"
-        # Run clean first? Sometimes helpful after dependency issues.
-        # bazel clean --expunge # Uncomment cautiously, increases build time
+
+        # ========== CHANGE: Force clean Bazel cache ==========
+        echo "Cleaning Bazel cache..."
+        bazel clean --expunge || echo "Bazel clean failed, proceeding anyway..."
+
+        echo "Starting build..."
         bazel build ${LITERT_C_TARGET} ${{ matrix.bazel_config }} --verbose_failures --jobs=2
 
     - name: Prepare Artifacts (${{ matrix.abi }})
