@@ -1,235 +1,55 @@
-name: Build LiteRT for Android
+name: Build LiteRT for Android and iOS
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch: # Allow manual trigger
 
 jobs:
-  build-android:
-    name: Build LiteRT for Android (${{ matrix.abi }})
-    runs-on: ubuntu-latest
+  build:
     strategy:
-      fail-fast: false
       matrix:
         include:
-          - abi: arm64-v8a
-            bazel_config: "--config=android_arm64 -c opt"
-            artifact_suffix: android-arm64-v8a
-          - abi: armeabi-v7a
-            bazel_config: "--config=android_arm -c opt"
-            artifact_suffix: android-armeabi-v7a
+          - platform: android
+            runs_on: ubuntu-latest         # Android 一般使用 Ubuntu 环境构建
+            config: android                # Bazel 构建时使用 Android 配置
+            target: //lite_rt:litert        # 调整为实际的目标名称
+          - platform: ios
+            runs_on: macos-latest          # iOS 构建需要 macOS 环境
+            config: ios                    # Bazel 构建时使用 iOS 配置
+            target: //lite_rt:litert        # 调整为实际的目标名称
+    runs-on: ${{ matrix.runs_on }}
 
     steps:
-    - name: Checkout LiteRT source code
-      uses: actions/checkout@v4
-      with:
-        repository: google-ai-edge/LiteRT
-        submodules: 'recursive'
-        fetch-depth: 0 # Fetch all history to ensure submodule commits are available
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-    - name: Ensure all submodules are initialized and check status
-      run: |
-        set -ex
-        echo "--- Git Version ---"
-        git --version
-        echo "--- Updating submodules ---"
-        git submodule update --init --recursive --force # Add --force for good measure
-        echo "--- Checking submodule status (very important!) ---"
-        git submodule status --recursive || echo "Submodule status command failed"
-        echo "--- Checking specific submodule directory ---"
-        ls -l third_party/tensorflow/ || echo "third_party/tensorflow directory not found"
-        echo "--- Checking commit hash of tensorflow submodule ---"
-        (cd third_party/tensorflow && git rev-parse HEAD) || echo "Could not get commit hash for tensorflow submodule"
+      - name: Set up Bazelisk
+        run: |
+          # 根据运行平台下载相应的 Bazelisk 二进制文件
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            curl -L https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -o bazelisk
+          elif [ "$RUNNER_OS" = "Darwin" ]; then
+            curl -L https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-darwin-amd64 -o bazelisk
+          else
+            echo "Unsupported OS: $RUNNER_OS"
+            exit 1
+          fi
+          chmod +x bazelisk
+          # 将 Bazelisk 重命名为 bazel 并移动到系统 PATH 中
+          sudo mv bazelisk /usr/local/bin/bazel
+          bazel version
 
-    - name: Debug File Structure and WORKSPACEs
-      run: |
-        set -ex
-        echo "--- Verifying python_wheel.bzl using find ---"
-        find . -name "python_wheel.bzl" -ls || echo "python_wheel.bzl not found anywhere via find."
+      - name: Build LiteRT for ${{ matrix.platform }}
+        run: |
+          # 调用 Bazel 构建指定平台的目标
+          bazel build ${{ matrix.target }} --config=${{ matrix.config }} --compilation_mode=opt --verbose_failures
 
-        echo "--- Displaying LiteRT WORKSPACE (searching for xla definition) ---"
-        cat WORKSPACE || echo "LiteRT WORKSPACE file not found or cannot be read."
-        echo "--- Searching LiteRT WORKSPACE for 'xla' ---"
-        grep -i 'xla' WORKSPACE || echo "'xla' not found in LiteRT WORKSPACE"
-
-        echo "--- Displaying TensorFlow WORKSPACE ---"
-        cat third_party/tensorflow/WORKSPACE || echo "TensorFlow WORKSPACE file not found or cannot be read."
-
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
-
-    - name: Install Essential Linux Packages
-      run: |
-        set -ex
-        sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends \
-          build-essential \
-          python3-dev \
-          python3-pip \
-          curl \
-          zip \
-          unzip \
-          git \
-          wget \
-          patchelf
-
-    - name: Install/Upgrade Python Build Tools and Dependencies
-      run: |
-        set -ex
-        python3 -m pip install --upgrade pip setuptools wheel
-        python3 -m pip install --user numpy==1.23.5 # Adjust if needed
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-    - name: Install Android SDK and NDK
-      # (Keep this step as is)
-      run: |
-        set -ex
-        NDK_VERSION="25.2.9519653"
-        CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip"
-        export ANDROID_SDK_ROOT="${HOME}/android-sdk"
-        mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"
-        echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" >> $GITHUB_ENV
-        echo "Downloading Android Command-line Tools..."
-        wget -q "${CMDLINE_TOOLS_URL}" -O cmdline-tools.zip
-        unzip -q cmdline-tools.zip -d "${ANDROID_SDK_ROOT}/cmdline-tools"
-        mv "${ANDROID_SDK_ROOT}/cmdline-tools/cmdline-tools" "${ANDROID_SDK_ROOT}/cmdline-tools/latest" || true
-        rm cmdline-tools.zip
-        export PATH="${PATH}:${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools"
-        echo "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "${ANDROID_SDK_ROOT}/platform-tools" >> $GITHUB_PATH
-        echo "Updating sdkmanager..."
-        sdkmanager --update || echo "sdkmanager update command finished (may show errors, proceeding)"
-        echo "Accepting Android SDK licenses..."
-        yes | sdkmanager --licenses > /dev/null || echo "Failed to accept licenses automatically. Check logs."
-        echo "Installing Android NDK version ${NDK_VERSION} and platform-tools..."
-        sdkmanager "platform-tools" "ndk;${NDK_VERSION}" || echo "NDK/Platform Tools install command finished (may already be installed)"
-        export ANDROID_HOME="${ANDROID_SDK_ROOT}"
-        export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}"
-        echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
-        echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
-        echo "Verifying NDK installation at: ${ANDROID_NDK_HOME}"
-        if [ ! -d "${ANDROID_NDK_HOME}" ]; then
-          echo "Error: Android NDK directory not found after installation attempt!"
-          ls -l "${ANDROID_SDK_ROOT}/ndk/"
-          exit 1
-        fi
-        ls -l "${ANDROID_NDK_HOME}"
-
-    - name: Setup Bazelisk (Manages Bazel versions)
-      uses: bazelbuild/setup-bazelisk@v3
-
-    - name: Show Bazel version and Env Vars
-      # (Keep this step as is)
-      run: |
-        bazel --version
-        echo "Java version: $(java -version)"
-        echo "Python version: $(python3 --version)"
-        echo "ANDROID_HOME=$ANDROID_HOME"
-        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
-        echo "PATH=$PATH"
-
-    - name: Configure Workspace
-      # (Keep this step as is)
-      shell: bash
-      run: |
-        set -exo pipefail
-        export PYTHON_BIN_PATH=$(which python3)
-        echo "Using PYTHON_BIN_PATH=${PYTHON_BIN_PATH}"
-        if [ -f ./configure.py ]; then
-          echo "Running ./configure.py"
-          python3 ./configure.py
-          echo "Finished running ./configure.py (Check output above for errors)"
-        elif [ -f ./configure ]; then
-          echo "Running ./configure"
-          ./configure
-          echo "Finished running ./configure (Check output above for errors)"
-        else
-          echo "No standard configure script found."
-        fi
-
-    - name: Build LiteRT C API for Android (${{ matrix.abi }})
-      shell: bash
-      run: |
-        set -ex
-        echo "Building with Bazel config: ${{ matrix.bazel_config }}"
-        LITERT_C_TARGET="//tensorflow/lite/c:litert_c_api" # ASSUMPTION - VERIFY THIS
-
-        echo "Attempting to build Bazel target: ${LITERT_C_TARGET}"
-
-        echo "Cleaning Bazel cache..."
-        bazel clean --expunge || echo "Bazel clean failed, proceeding anyway..."
-
-        echo "Starting build..."
-        # Try adding --experimental_repository_resolved_file to see how bazel resolves repos
-        bazel build ${LITERT_C_TARGET} ${{ matrix.bazel_config }} \
-          --verbose_failures \
-          --jobs=2 \
-          --experimental_verbose_module_repo_mapping \
-          --experimental_repository_resolved_file=resolved.bzl || echo "Build failed. See logs above."
-
-        # If the build fails, try printing the generated resolved file
-        echo "--- Contents of resolved.bzl (if generated) ---"
-        cat resolved.bzl || echo "resolved.bzl not found or build did not reach that point."
-
-        # Ensure the script exits with an error if bazel build failed earlier
-        # Re-run build and let it fail naturally if the '|| echo' above masked the error
-        bazel build ${LITERT_C_TARGET} ${{ matrix.bazel_config }} --verbose_failures --jobs=2
-
-    - name: Prepare Artifacts (${{ matrix.abi }})
-      # (Keep this step as is)
-      shell: bash
-      run: |
-        set -ex
-        ARTIFACT_DIR="litert_build_${{ matrix.artifact_suffix }}"
-        mkdir -p "${ARTIFACT_DIR}/lib"
-        INCLUDE_SRC_DIR="tensorflow/lite/c"        # ASSUMPTION - VERIFY THIS
-        INCLUDE_DEST="${ARTIFACT_DIR}/include/tensorflow/lite/c"
-        mkdir -p "${INCLUDE_DEST}"
-        LITERT_C_TARGET="//tensorflow/lite/c:litert_c_api" # Use the same target as build step
-        LIB_PATH_QUERY=$(bazel cquery ${LITERT_C_TARGET} ${{ matrix.bazel_config }} --output=files 2>/dev/null | grep -E '\.a$' | head -n 1) || true
-        if [ -z "$LIB_PATH_QUERY" ] || [ ! -f "$LIB_PATH_QUERY" ]; then
-           echo "Warning: bazel cquery did not find the static library (.a) directly. Searching bazel-bin..."
-           SEARCH_PATTERN="*lib$(basename ${LITERT_C_TARGET}).a"
-           LIB_PATH=$(find bazel-bin/ -path "*/_objs/$(basename ${LITERT_C_TARGET})/*" -name "*.a" -print -quit || find bazel-bin/ -name "${SEARCH_PATTERN}" -print -quit)
-           if [ -z "$LIB_PATH" ] || [ ! -f "$LIB_PATH" ]; then
-             echo "Error: Could not find the built library file (.a) in bazel-bin."
-             find bazel-bin/ -name "*.a"
-             exit 1
-           fi
-           echo "Found library via find: ${LIB_PATH}"
-        else
-            LIB_PATH="$LIB_PATH_QUERY"
-            echo "Found library via cquery: ${LIB_PATH}"
-        fi
-        cp -v "${LIB_PATH}" "${ARTIFACT_DIR}/lib/"
-        echo "Copying header files from ${INCLUDE_SRC_DIR} to ${INCLUDE_DEST}"
-        if [ -d "${INCLUDE_SRC_DIR}" ]; then
-          cp -v "${INCLUDE_SRC_DIR}"/*.h "${INCLUDE_DEST}/"
-        else
-           echo "Warning: Header source directory '${INCLUDE_SRC_DIR}' not found."
-        fi
-        ARCHIVE_NAME="${ARTIFACT_DIR}.tar.gz"
-        echo "Creating archive: ${ARCHIVE_NAME}"
-        tar -czvf "${ARCHIVE_NAME}" "${ARTIFACT_DIR}/"
-        echo "ARCHIVE_FILE=${ARCHIVE_NAME}" >> $GITHUB_ENV
-        echo "Artifact Directory Contents (${ARTIFACT_DIR}):"
-        ls -R "${ARTIFACT_DIR}"
-
-    - name: Upload Android Artifact (${{ matrix.abi }})
-      # (Keep this step as is)
-      uses: actions/upload-artifact@v4
-      with:
-        name: litert-lib-${{ matrix.artifact_suffix }}
-        path: ${{ env.ARCHIVE_FILE }}
-        retention-days: 7
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: LiteRT-${{ matrix.platform }}
+          # 这里使用通配符上传 Bazel 输出目录下的所有文件，
+          # 你也可以根据实际构建产物路径进行精准配置，例如 bazel-bin/lite_rt/**
+          path: bazel-bin/**
