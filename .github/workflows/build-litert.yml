@@ -12,13 +12,13 @@ jobs:
       matrix:
         include:
           - platform: android
-            runs_on: ubuntu-latest         # Android 一般使用 Ubuntu 环境构建
-            config: android                # Bazel 构建时使用 Android 配置
-            target: //lite_rt:litert        # 调整为实际的目标名称
+            runs_on: ubuntu-latest         # 安卓构建环境
+            config: android                # Bazel 构建时使用的 Android 配置
+            target: //lite_rt:litert        # 请根据实际的 BUILD 文件调整目标名称
           - platform: ios
             runs_on: macos-latest          # iOS 构建需要 macOS 环境
-            config: ios                    # Bazel 构建时使用 iOS 配置
-            target: //lite_rt:litert        # 调整为实际的目标名称
+            config: ios                    # Bazel 构建时使用的 iOS 配置
+            target: //lite_rt:litert        # 请根据实际的 BUILD 文件调整目标名称
     runs-on: ${{ matrix.runs_on }}
 
     steps:
@@ -27,29 +27,26 @@ jobs:
 
       - name: Set up Bazelisk
         run: |
-          # 根据运行平台下载相应的 Bazelisk 二进制文件
+          # 根据当前运行平台下载适用的 Bazelisk 二进制文件
           if [ "$RUNNER_OS" = "Linux" ]; then
-            curl -L https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -o bazelisk
+            curl -L -o bazelisk https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
           elif [ "$RUNNER_OS" = "Darwin" ]; then
-            curl -L https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-darwin-amd64 -o bazelisk
+            curl -L -o bazelisk https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-darwin-amd64
           else
             echo "Unsupported OS: $RUNNER_OS"
             exit 1
           fi
           chmod +x bazelisk
-          # 将 Bazelisk 重命名为 bazel 并移动到系统 PATH 中
           sudo mv bazelisk /usr/local/bin/bazel
           bazel version
 
       - name: Build LiteRT for ${{ matrix.platform }}
         run: |
-          # 调用 Bazel 构建指定平台的目标
+          # 使用 Bazelisk 调用 Bazel 进行构建，根据平台传入不同配置
           bazel build ${{ matrix.target }} --config=${{ matrix.config }} --compilation_mode=opt --verbose_failures
 
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: LiteRT-${{ matrix.platform }}
-          # 这里使用通配符上传 Bazel 输出目录下的所有文件，
-          # 你也可以根据实际构建产物路径进行精准配置，例如 bazel-bin/lite_rt/**
           path: bazel-bin/**
