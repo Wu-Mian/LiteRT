@@ -1,4 +1,4 @@
-name: Build LiteRT for Android
+name: Build LiteRT Android Library
 
 on:
   push:
@@ -15,25 +15,28 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: 'recursive'
-
-      - name: Set up Bazelisk
+          
+      - name: Install Bazelisk
         run: |
-          # 下载最新版 Bazelisk Linux 版
+          # 下载适用于 Linux 的 Bazelisk 二进制文件
           curl -L -o bazelisk https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
           chmod +x bazelisk
-          # 将 Bazelisk 重命名为 bazel 并移至 /usr/local/bin/
+          # 移动到系统 PATH 中，更名为 bazel
           sudo mv bazelisk /usr/local/bin/bazel
-          # 输出 Bazel 版本信息，确认 Bazelisk 已正常安装
+          echo "Bazel version:"
           bazel version
 
-      - name: Build LiteRT for Android
+      - name: Build LiteRT Android Library
         run: |
-          # 使用 Bazel 构建目标，--config=android 表示使用 Android 平台所需的配置
+          # 使用 Bazel 构建目标
+          # --config=android 确保调用 Android 交叉编译所需配置，
+          # --compilation_mode=opt 输出优化版本，
+          # --verbose_failures 便于调试错误信息
           bazel build //lite_rt:litert --config=android --compilation_mode=opt --verbose_failures
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: LiteRT-android
-          # 根据你的 BUILD 文件，构建产物一般位于 bazel-bin 目录下，这里上传所有产物，你可进一步调整路径以精确匹配需要上传的文件
+          # 根据实际需要调整上传路径，此处上传整个 bazel-bin 目录下所有文件
           path: bazel-bin/**
