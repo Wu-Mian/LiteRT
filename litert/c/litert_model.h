@@ -22,7 +22,7 @@
 #include "litert/c/litert_common.h"
 #include "litert/c/litert_layout.h"
 #include "litert/c/litert_op_code.h"
-#include "tensorflow/lite/core/c/c_api_types.h"  // from @org_tensorflow
+#include "tflite/core/c/c_api_types.h"  // from @org_tensorflow
 
 #ifdef __cplusplus
 extern "C" {
@@ -218,6 +218,10 @@ LiteRtStatus LiteRtGetTensorWeights(LiteRtTensor tensor,
 LiteRtStatus LiteRtGetWeightsBytes(LiteRtWeights weights, const void** addr,
                                    size_t* size);
 
+// Get the buffer id associated with the weights. Buffer id managed internally
+// by the buffer manager. Buffer id starts from 1.
+LiteRtStatus LiteRtGetWeightsBufferId(LiteRtWeights weights,
+                                      int32_t* buffer_id);
 //
 // LiteRtOp
 //

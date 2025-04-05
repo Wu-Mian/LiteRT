@@ -87,12 +87,12 @@ cc_library(
         "//litert/runtime:metrics",
         "//litert/runtime:tfl_utils",
         "//litert/vendors/c:litert_dispatch_c_api",
-        "@org_tensorflow//tensorflow/lite/c:c_api",
-        "@org_tensorflow//tensorflow/lite/c:c_api_opaque",
-        "@org_tensorflow//tensorflow/lite/c:c_api_types",
-        "@org_tensorflow//tensorflow/lite/c:common",
-        "@org_tensorflow//tensorflow/lite/core/c:private_c_api_opaque_without_op_resolver",
-        "@org_tensorflow//tensorflow/lite/delegates/utils:simple_opaque_delegate",
+        "//tflite/c:c_api",
+        "//tflite/c:c_api_opaque",
+        "//tflite/c:c_api_types",
+        "//tflite/c:common",
+        "//tflite/core/c:private_c_api_opaque_without_op_resolver",
+        "//tflite/delegates/utils:simple_opaque_delegate",
     ],
 )
 
@@ -101,9 +101,8 @@ litert_device_test(
     srcs = ["dispatch_delegate_google_tensor_test.cc"],
     backend_id = "google_tensor",
     data = [
-        "//litert/test:testdata/shared_input_cpu_npu.tflite",
-        "//litert/test:testdata/simple_model_google_tensor.bin",
-        "//litert/test:testdata/simple_model_npu.tflite",
+        "//litert/test:testdata/shared_input_cpu_npu_google_tensor_precompiled.tflite",
+        "//litert/test:testdata/simple_model_npu_google_tensor_precompiled.tflite",
     ],
     linkopts = gles_linkopts(),
     deps = [
@@ -129,8 +128,8 @@ litert_device_test(
         "//litert/test:common",
         "//litert/test:matchers",
         "//litert/test:simple_model_npu",
-        "@org_tensorflow//tensorflow/lite:framework",
-        "@org_tensorflow//tensorflow/lite/c:c_api_opaque",
+        "//tflite:framework",
+        "//tflite/c:c_api_opaque",
     ],
 )
 
@@ -155,13 +154,15 @@ litert_device_test(
         "//litert/cc:litert_compiled_model",
         "//litert/cc:litert_dispatch_delegate",
         "//litert/cc:litert_environment",
+        "//litert/cc:litert_expected",
         "//litert/cc:litert_model",
         "//litert/cc:litert_tensor_buffer",
         "//litert/runtime:external_litert_buffer_context",
         "//litert/test:common",
+        "//litert/test:matchers",
         "//litert/test:simple_model_npu",
-        "@org_tensorflow//tensorflow/lite:framework",
-        "@org_tensorflow//tensorflow/lite/c:c_api_opaque",
+        "//tflite:framework",
+        "//tflite/c:c_api_opaque",
     ],
 )
 
@@ -171,6 +172,8 @@ litert_device_test(
     backend_id = "mediatek",
     data = [
         "//litert/test:testdata/shared_input_cpu_npu.tflite",
+        "//litert/test:testdata/simple_model_mtk.bin",
+        "//litert/test:testdata/simple_model_npu.tflite",
     ],
     deps = [
         ":dispatch_delegate",
@@ -189,10 +192,11 @@ litert_device_test(
         "//litert/core/util:flatbuffer_tools",
         "//litert/runtime:external_litert_buffer_context",
         "//litert/test:common",
+        "//litert/test:matchers",
         "//litert/test:simple_model_npu",
-        "@org_tensorflow//tensorflow/lite:framework",
-        "@org_tensorflow//tensorflow/lite/c:c_api_opaque",
-        "@org_tensorflow//tensorflow/lite/c:common",
-        "@org_tensorflow//tensorflow/lite/kernels:builtin_ops",
+        "//tflite:framework",
+        "//tflite/c:c_api_opaque",
+        "//tflite/c:common",
+        "//tflite/kernels:builtin_ops",
     ],
 )

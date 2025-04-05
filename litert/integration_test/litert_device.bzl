@@ -171,12 +171,12 @@ QUALCOMM_SPEC = BackendSpec(
         ("//third_party/qairt/latest:lib/aarch64-android/libQnnHtpPrepare.so", "LD_LIBRARY_PATH"),
         ("//third_party/qairt/latest:lib/hexagon-v75/unsigned/libQnnHtpV75Skel.so", "ADSP_LIBRARY_PATH"),
         ("//litert/vendors/qualcomm/dispatch:libLiteRtDispatch_Qualcomm.so", "LD_LIBRARY_PATH"),
-        ("//litert/vendors/qualcomm/compiler:qnn_compiler_plugin_so", "LD_LIBRARY_PATH"),
+        ("//litert/vendors/qualcomm/compiler:libLiteRtCompilerPlugin_Qualcomm.so", "LD_LIBRARY_PATH"),
     ],
     mh_devices = [{
         "model": "sm-s928b",
     }],
-    plugin = "qnn_compiler_plugin_so",
+    plugin = "libLiteRtCompilerPlugin_Qualcomm.so",
     dispatch = "libLiteRtDispatch_Qualcomm.so",
 )
 
@@ -185,12 +185,12 @@ QUALCOMM_SPEC = BackendSpec(
 MEDIATEK_SPEC = BackendSpec(
     id = "mediatek",
     libs = [
-        ("//litert/vendors/mediatek/dispatch:libLiteRtDispatch_Mtk.so", "LD_LIBRARY_PATH"),
+        ("//litert/vendors/mediatek/dispatch:libLiteRtDispatch_Mediatek.so", "LD_LIBRARY_PATH"),
     ],
     mh_devices = [{
         "hardware": "mt6989",
     }],
-    dispatch = "libLiteRtDispatch_Mtk.so",
+    dispatch = "libLiteRtDispatch_Mediatek.so",
 )
 
 # GOOGLE TENSOR
@@ -335,6 +335,7 @@ def litert_device_exec(
         # args = [
             # "--run_as=odml-device-lab",
         # ],
+        # test_options = exec_args,
         # dimensions = backend.default_mh_device,
         # tags = [
             # "android",
@@ -360,7 +361,8 @@ def litert_device_test(
         exec_args = [],
         exec_env_vars = [],
         tags = [],
-        linkopts = []):
+        linkopts = [],
+        copts = []):
     """
     Syntactic sugar for the litert_device_exec macro.
 
@@ -378,6 +380,7 @@ def litert_device_test(
         exec_env_vars: List of environment variables to set before executing the target.
         tags: List of tags to apply to the target to be generated.
         linkopts: List of linkopts to apply to the target to be generated.
+        copts: List of copts to apply to the target to be generated.
     """
 
     target = "_{}".format(name)
@@ -391,6 +394,7 @@ def litert_device_test(
             "@org_tensorflow//tensorflow:android": ["-landroid"],
             "//conditions:default": [],
         }) + linkopts,
+        copts = copts,
         tags = hidden_test_tags() + tags,
     )
 
